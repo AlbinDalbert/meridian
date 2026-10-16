@@ -41,6 +41,9 @@ defmodule MeridianWeb.Endpoint do
     plug Phoenix.Ecto.CheckRepoStatus, otp_app: :meridian
   end
 
+  # Before the parsers and router, so preflight requests are answered without a route.
+  plug MeridianWeb.Plugs.CORS
+
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 

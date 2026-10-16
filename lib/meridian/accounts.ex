@@ -121,6 +121,11 @@ defmodule Meridian.Accounts do
     end
   end
 
+  @doc "Gets an active (not revoked) API key by id, with its user preloaded."
+  def get_active_api_key(id) do
+    Repo.one(from k in ApiKey, where: k.id == ^id and is_nil(k.revoked_at), preload: :user)
+  end
+
   defp touch_last_used(%ApiKey{} = api_key) do
     now = DateTime.utc_now()
     stale_before = DateTime.add(now, -@last_used_resolution_seconds)

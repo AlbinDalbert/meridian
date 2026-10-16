@@ -4,21 +4,24 @@ defmodule MeridianWeb.Plugs.ApiKeyAuth do
 
   On success, assigns `:current_api_key` (with its user preloaded) and `:current_user`.
   Otherwise responds `401` with an OpenAI-style error.
+
+  With `events_token: true` (run event streams only), a `?token=` query param holding the
+  run's `MeridianWeb.EventsToken` is accepted instead, for browsers' `EventSource`.
   """
   @behaviour Plug
 
   import Plug.Conn
 
   alias Meridian.Accounts
+  alias MeridianWeb.EventsToken
   alias MeridianWeb.V1.OpenAIError
 
   @impl true
-  def init(opts), do: opts
+  def init(opts), do: Keyword.validate!(opts, events_token: false)
 
   @impl true
-  def call(conn, _opts) do
-    with {:ok, token} <- bearer_token(conn),
-         {:ok, api_key} <- Accounts.authenticate_api_key(token) do
+  def call(conn, opts) do
+    with {:ok, api_key} <- authenticate(conn, opts[:events_token]) do
       conn
       |> assign(:current_api_key, api_key)
       |> assign(:current_user, api_key.user)
@@ -33,6 +36,27 @@ defmodule MeridianWeb.Plugs.ApiKeyAuth do
 
       :error ->
         OpenAIError.send_error(conn, 401, "invalid_api_key", "Invalid or revoked API key.")
+    end
+  end
+
+  defp authenticate(conn, events_token?) do
+    case bearer_token(conn) do
+      {:ok, token} -> Accounts.authenticate_api_key(token)
+      :missing when events_token? -> authenticate_events_token(conn)
+      :missing -> :missing
+    end
+  end
+
+  defp authenticate_events_token(conn) do
+    conn = fetch_query_params(conn)
+
+    with %{"token" => token} when is_binary(token) <- conn.query_params,
+         {:ok, api_key_id} <- EventsToken.verify(token, conn.path_params["id"]),
+         %{} = api_key <- Accounts.get_active_api_key(api_key_id) do
+      {:ok, api_key}
+    else
+      %{} -> :missing
+      _ -> :error
     end
   end
 

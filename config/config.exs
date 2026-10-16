@@ -45,6 +45,9 @@ config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
   metadata: [:request_id]
 
+# Run event stream tokens travel in the query string (EventSource can't send headers).
+config :phoenix, :filter_parameters, ["password", "token"]
+
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 

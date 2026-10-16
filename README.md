@@ -55,6 +55,22 @@ curl -N -H "authorization: Bearer $KEY" localhost:4000/api/runs/$RUN/events   # 
 curl -s -H "authorization: Bearer $KEY" localhost:4000/api/threads/$THREAD/messages
 ```
 
+**Browser apps** are supported clients. Set `CORS_ALLOWED_ORIGINS` to the app's origin. The
+app sends the key as `Authorization: Bearer` on every request. For the event stream, either read
+it with `fetch` (which can send the header), or use `EventSource` with the run's
+`events_token` (included in every run in API responses), since `EventSource` can't send
+headers:
+
+```js
+const es = new EventSource(`${base}/api/runs/${run.id}/events?token=${encodeURIComponent(run.events_token)}`);
+es.addEventListener("message.delta", (e) => render(JSON.parse(e.data).payload));
+es.addEventListener("run.completed", () => es.close());
+```
+
+The token only reads that run's events, expires after an hour, and stops working when the key
+is revoked. `EventSource` resumes on its own after a dropped connection (it sends
+`Last-Event-ID`); once a run has ended, a reconnect gets `204`, which makes it stop.
+
 Other endpoints: `GET/PATCH/DELETE /api/threads/:id`, `GET /api/runs/:id`, and
 `POST /api/runs/:id/cancel`. The admin console shows threads and runs, including a live view
 of a run as it generates.
@@ -91,6 +107,7 @@ docker run -p 4000:4000 \
 | `LLM_BASE_URL`    | yes\*    | OpenAI-compatible upstream, including `/v1` (e.g. `https://example.com/v1`) |
 | `LLM_API_KEY`     | no       | Upstream API key, sent as a bearer token |
 | `EXPOSE_UPSTREAM_MODELS` | no | `true` to also list raw upstream models in `/v1/models` |
+| `CORS_ALLOWED_ORIGINS` | no  | Browser apps allowed to call `/v1` and `/api`: comma-separated origins (`https://chat.example.com,http://localhost:5173`) or `*`. Unset means none |
 | `ADMIN_TOKEN`     | no       | Enables `/admin` and is the secret to log in with (32+ chars). Unset disables the admin console |
 
 \* Meridian starts without it, but can't serve completions.

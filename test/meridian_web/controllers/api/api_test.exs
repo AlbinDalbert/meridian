@@ -265,6 +265,60 @@ defmodule MeridianWeb.ApiTest do
                conn |> get(~p"/api/runs/#{run_id}/events") |> response(200) |> sse_events()
     end
 
+    test "a reconnect after the run ended gets 204, so EventSource stops", %{
+      conn: conn,
+      run_id: run_id
+    } do
+      stub_upstream_stream(completion_events(["ok"]))
+      :ok = execute(run_id)
+
+      conn = conn |> put_req_header("last-event-id", "4") |> get(~p"/api/runs/#{run_id}/events")
+      assert response(conn, 204) == ""
+    end
+
+    test "browsers can authenticate with the run's events token", %{conn: conn, user: user} do
+      thread = create_thread(conn)
+      %{"run" => run} = send_message(conn, thread["id"], "Hi")
+      assert is_binary(run["events_token"])
+
+      assert %{"data" => %{"events_token" => _}} =
+               conn |> get(~p"/api/runs/#{run["id"]}") |> json_response(200)
+
+      assert %{"data" => %{"active_run" => %{"events_token" => _}}} =
+               conn |> get(~p"/api/threads/#{thread["id"]}") |> json_response(200)
+
+      stub_upstream_stream(completion_events(["ok"]))
+      :ok = execute(run["id"])
+
+      path = ~p"/api/runs/#{run["id"]}/events"
+
+      assert [{1, "run.started", _} | _] =
+               build_conn()
+               |> get(path, %{"token" => run["events_token"]})
+               |> response(200)
+               |> sse_events()
+
+      # Not valid for another run, for other endpoints, or once garbled.
+      %{"run" => other_run} = send_message(conn, create_thread(conn)["id"], "Hi")
+
+      assert %{"error" => %{"code" => "invalid_api_key"}} =
+               build_conn()
+               |> get(~p"/api/runs/#{other_run["id"]}/events", %{"token" => run["events_token"]})
+               |> json_response(401)
+
+      assert build_conn()
+             |> get(~p"/api/runs/#{run["id"]}", %{"token" => run["events_token"]})
+             |> json_response(401)
+
+      assert build_conn() |> get(path, %{"token" => "nope"}) |> json_response(401)
+
+      # Revoking the key revokes its tokens.
+      [api_key] = Meridian.Accounts.list_api_keys(user)
+      {:ok, _} = Meridian.Accounts.revoke_api_key(api_key)
+
+      assert build_conn() |> get(path, %{"token" => run["events_token"]}) |> json_response(401)
+    end
+
     test "of other users' runs are not visible", %{run_id: run_id} do
       other_key = api_key_fixture(user_fixture())
       conn = authed(build_conn(), other_key)

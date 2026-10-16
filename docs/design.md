@@ -148,6 +148,13 @@ WebSocket (Phoenix Channels at `/socket`, authenticated with an API key):
 - Client → server messages on the thread channel: `send_message`, `cancel`, and later `approve` /
   `deny` for tool approval.
 
+**Browser clients are first-class.** CORS for `/v1` and `/api` is configured by
+`CORS_ALLOWED_ORIGINS`. Since `EventSource` can't send an `Authorization` header, every run in
+an API response carries an `events_token` (signed, valid for that run's events only, one hour,
+tied to the issuing key) accepted as `?token=` on `GET /api/runs/:id/events`. A reconnect to a
+finished run with nothing left to send gets `204`, so `EventSource` stops instead of
+reconnecting forever.
+
 SSE and Channels are two transports over the same event log and PubSub topics. Neither has
 special semantics. SSE exists for simple clients and curl; Channels for rich clients that want
 bidirectional communication on one connection.
@@ -459,6 +466,7 @@ is in the repo.
 | `LLM_BASE_URL`         | OpenAI-compatible upstream, e.g. `https://example.com/v1` |
 | `LLM_API_KEY`          | Upstream key (optional) |
 | `EXPOSE_UPSTREAM_MODELS` | Also list raw upstream models in `/v1/models` (default `false`) |
+| `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call `/v1` and `/api` (comma-separated, or `*`). Unset = none |
 | `ADMIN_TOKEN`          | Enables `/admin`; the secret used to log in. Unset = admin disabled |
 | `EXTENSIONS_DIR`       | Optional directory of `.ex` extensions compiled at boot (if we do that) |
 
@@ -569,6 +577,9 @@ Add an entry whenever a decision is made or reversed.
 | **Reasoning is stored as a `reasoning` content part and never sent back upstream** | Dropping it; storing it in metadata | Clients and the admin UI can show it; chat templates generally expect reasoning to be stripped from history. |
 | **`POST /messages` only supports `if_busy: reject` (409) for now; deleting a thread with an active run is also a 409** | Queue/interrupt now; cancel-then-delete | Clients can cancel and retry explicitly. Keeps the one-active-run invariant simple until a client needs more. |
 | **The native API uses the same error shape as `/v1`** (`{"error": {"message", "type", "code"}}`) | A separate error format | One shape for clients to handle; the API key plug is shared. |
+| **Browser apps are first-class clients: CORS via `CORS_ALLOWED_ORIGINS`, never with credentials, never on `/admin`** | No CORS (same-origin or native clients only); a CORS dependency | APIs authenticate only with bearer keys, never cookies, so allowing an origin (even `*`) doesn't let a page act for anyone whose key it doesn't have. Requested headers are allowed as asked (SDKs send their own `x-` headers). A small plug, no new dependency. |
+| **`EventSource` authenticates with a run-scoped `events_token` in the query string** | API key in the query string; requiring `fetch`-based SSE | Keys in URLs end up in proxy logs and history. A signed token that only reads one run's events, expires in an hour, and dies with its key limits that exposure. `fetch` with the header also works. `token` is filtered from Phoenix logs. |
+| **A finished run's stream answers a reconnect with `204`** | Holding the connection open; `200` with an empty body | `EventSource` reconnects whenever a stream ends; `204` is the spec's signal to stop. |
 | **UUIDv7 ids are generated with monotonic precision** | Millisecond precision | Messages are ordered by id; ids created within the same millisecond must still sort in creation order. |
 
 ## Open questions

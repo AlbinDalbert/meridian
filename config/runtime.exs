@@ -44,6 +44,21 @@ if config_env() != :test do
   end
 
   config :meridian, :admin_token, admin_token
+
+  # Browser apps allowed to call /v1 and /api: comma-separated origins, or "*".
+  cors_allowed_origins =
+    case System.get_env("CORS_ALLOWED_ORIGINS", "") |> String.trim() do
+      "*" ->
+        :all
+
+      origins ->
+        origins
+        |> String.split(",", trim: true)
+        |> Enum.map(&(&1 |> String.trim() |> String.trim_trailing("/")))
+        |> Enum.reject(&(&1 == ""))
+    end
+
+  config :meridian, :cors_allowed_origins, cors_allowed_origins
 end
 
 if config_env() == :prod do

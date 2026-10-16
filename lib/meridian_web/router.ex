@@ -9,9 +9,10 @@ defmodule MeridianWeb.Router do
     plug MeridianWeb.Plugs.ApiKeyAuth
   end
 
-  # Server-sent event streams. No `accepts`: clients send `Accept: text/event-stream`.
+  # Server-sent event streams. No `accepts`: clients send `Accept: text/event-stream`. Also
+  # accepts a run's events token in the query string, for browsers' EventSource.
   pipeline :api_stream do
-    plug MeridianWeb.Plugs.ApiKeyAuth
+    plug MeridianWeb.Plugs.ApiKeyAuth, events_token: true
   end
 
   # The OpenAI-compatible surface. No `accepts` here: OpenAI clients send all sorts of Accept

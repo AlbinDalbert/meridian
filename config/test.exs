@@ -26,6 +26,8 @@ config :meridian, Meridian.Upstream,
   req_options: [plug: {Req.Test, Meridian.Upstream}],
   model_cache_ttl: 0
 
+config :meridian, :cors_allowed_origins, ["https://app.example"]
+
 config :meridian, :admin_token, "test-admin-token-0123456789abcdefghijklmnopqrstuvwxyz"
 
 # One message.delta event per upstream chunk, so tests are deterministic.

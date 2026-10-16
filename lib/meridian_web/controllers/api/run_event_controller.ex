@@ -7,11 +7,17 @@ defmodule MeridianWeb.Api.RunEventController do
   is the event's `seq`, so a reconnecting client (or `EventSource`) resumes without gaps or
   duplicates. Subscribing before replaying, and dropping live events already replayed,
   guarantees that.
+
+  Clients should stop after the terminal event (`run.completed`, `run.failed`,
+  `run.cancelled`). Browsers' `EventSource` reconnects on its own when a stream ends, so a
+  request for a finished run with nothing left to send gets `204 No Content`, which makes it
+  stop. Browsers authenticate with the run's `events_token` (`?token=`) since `EventSource`
+  can't send an `Authorization` header.
   """
   use MeridianWeb, :controller
 
   alias Meridian.Runs
-  alias Meridian.Runs.Event
+  alias Meridian.Runs.{Event, Run}
 
   action_fallback MeridianWeb.Api.FallbackController
 
@@ -21,27 +27,36 @@ defmodule MeridianWeb.Api.RunEventController do
     with %{} = run <- Runs.get_user_run(conn.assigns.current_user, id),
          {:ok, after_seq} <- cursor(conn, params) do
       :ok = Runs.subscribe(run)
+      events = Runs.list_events(run, after_seq)
 
-      conn =
-        conn
-        |> put_resp_content_type("text/event-stream", nil)
-        |> put_resp_header("cache-control", "no-cache")
-        # Ask reverse proxies (nginx) not to buffer the stream.
-        |> put_resp_header("x-accel-buffering", "no")
-        |> send_chunked(200)
-
-      run
-      |> Runs.list_events(after_seq)
-      |> Enum.reduce_while({:cont, conn, after_seq}, fn event, {:cont, conn, _seq} ->
-        case send_event(conn, event) do
-          {:cont, conn} -> {:cont, {:cont, conn, event.seq}}
-          halt -> {:halt, halt}
-        end
-      end)
-      |> case do
-        {:cont, conn, last_seq} -> stream_live(conn, last_seq)
-        {:halt, conn} -> conn
+      # Reload after subscribing: a run that finishes from here on is seen live.
+      if events == [] and Run.finished?(Runs.get_run!(run.id)) do
+        send_resp(conn, :no_content, "")
+      else
+        stream(conn, events, after_seq)
       end
+    end
+  end
+
+  defp stream(conn, events, after_seq) do
+    conn =
+      conn
+      |> put_resp_content_type("text/event-stream", nil)
+      |> put_resp_header("cache-control", "no-cache")
+      # Ask reverse proxies (nginx) not to buffer the stream.
+      |> put_resp_header("x-accel-buffering", "no")
+      |> send_chunked(200)
+
+    events
+    |> Enum.reduce_while({:cont, conn, after_seq}, fn event, {:cont, conn, _seq} ->
+      case send_event(conn, event) do
+        {:cont, conn} -> {:cont, {:cont, conn, event.seq}}
+        halt -> {:halt, halt}
+      end
+    end)
+    |> case do
+      {:cont, conn, last_seq} -> stream_live(conn, last_seq)
+      {:halt, conn} -> conn
     end
   end
 
