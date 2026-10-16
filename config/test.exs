@@ -20,6 +20,14 @@ config :meridian, MeridianWeb.Endpoint,
   secret_key_base: "Jw7mU0x67CLzVkXnQnQoBHP9L2/jukubQO1+aCziqJDuHMiNusqvan0GyB3vl/Pn",
   server: false
 
+# The upstream is stubbed with Req.Test; the model list is never cached between tests.
+config :meridian, Meridian.Upstream,
+  base_url: "http://upstream.test/v1",
+  req_options: [plug: {Req.Test, Meridian.Upstream}],
+  model_cache_ttl: 0
+
+config :meridian, :admin_token, "test-admin-token-0123456789abcdefghijklmnopqrstuvwxyz"
+
 # Jobs are executed explicitly in tests (see Oban.Testing)
 config :meridian, Oban, testing: :manual
 

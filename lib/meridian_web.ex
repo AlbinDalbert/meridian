@@ -6,7 +6,11 @@ defmodule MeridianWeb do
   This can be used in your application as:
 
       use MeridianWeb, :controller
+      use MeridianWeb, :live_view
       use MeridianWeb, :html
+
+  HTML is only used by the operator console under `/admin`; the client-facing
+  surfaces (`/v1`, `/api`) are JSON.
 
   The definitions below will be executed for every controller,
   component, etc, so keep them short and clean, focused
@@ -26,6 +30,7 @@ defmodule MeridianWeb do
       # Import common connection and controller functions to use in pipelines
       import Plug.Conn
       import Phoenix.Controller
+      import Phoenix.LiveView.Router
     end
   end
 
@@ -40,6 +45,38 @@ defmodule MeridianWeb do
       use Phoenix.Controller, formats: [:html, :json]
 
       import Plug.Conn
+
+      unquote(verified_routes())
+    end
+  end
+
+  def live_view do
+    quote do
+      use Phoenix.LiveView
+
+      unquote(html_helpers())
+    end
+  end
+
+  def html do
+    quote do
+      use Phoenix.Component
+
+      # Import convenience functions from controllers
+      import Phoenix.Controller,
+        only: [get_csrf_token: 0, view_module: 1, view_template: 1]
+
+      unquote(html_helpers())
+    end
+  end
+
+  defp html_helpers do
+    quote do
+      import Phoenix.HTML
+      import MeridianWeb.CoreComponents
+
+      alias Phoenix.LiveView.JS
+      alias MeridianWeb.Layouts
 
       unquote(verified_routes())
     end

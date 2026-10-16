@@ -23,6 +23,29 @@ end
 config :meridian, MeridianWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+if config_env() != :test do
+  config :meridian, Meridian.Upstream,
+    base_url: System.get_env("LLM_BASE_URL"),
+    api_key: System.get_env("LLM_API_KEY"),
+    expose_models: System.get_env("EXPOSE_UPSTREAM_MODELS") in ~w(true 1)
+
+  # Unset (or empty) disables /admin entirely.
+  admin_token =
+    case System.get_env("ADMIN_TOKEN") do
+      token when token in [nil, ""] -> nil
+      token -> token
+    end
+
+  if (config_env() == :prod and admin_token) && byte_size(admin_token) < 32 do
+    raise """
+    environment variable ADMIN_TOKEN is too short (minimum 32 characters).
+    You can generate one by calling: openssl rand -base64 48
+    """
+  end
+
+  config :meridian, :admin_token, admin_token
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

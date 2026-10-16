@@ -25,7 +25,8 @@ config :meridian, MeridianWeb.Endpoint,
     formats: [json: MeridianWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: Meridian.PubSub
+  pubsub_server: Meridian.PubSub,
+  live_view: [signing_salt: "q3Vx7nKcR2bLwE9d"]
 
 # Configure Elixir's Logger
 config :logger, :default_formatter,

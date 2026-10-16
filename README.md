@@ -29,6 +29,18 @@ mix phx.server         # http://localhost:4000
 mix test
 ```
 
+To use it locally, point it at an upstream and set an admin token:
+
+```sh
+export LLM_BASE_URL=http://localhost:8080/v1          # any OpenAI-compatible endpoint
+export ADMIN_TOKEN=$(openssl rand -base64 48)
+mix phx.server
+```
+
+Then open `http://localhost:4000/admin`, log in with the token, create a user (this also creates
+their `meridian/default` persona), and mint an API key. Point any OpenAI client at
+`http://localhost:4000/v1` with that key and pick a persona as the model.
+
 Before committing, run `mix precommit` (warnings as errors, unused deps, format, tests).
 
 Health probes: `GET /healthz` (liveness) and `GET /readyz` (database reachable).
@@ -58,5 +70,9 @@ docker run -p 4000:4000 \
 | `PORT`            | no       | Listen port (default `4000`) |
 | `POOL_SIZE`       | no       | Database pool size (default `10`) |
 | `ECTO_IPV6`       | no       | `true` to connect to Postgres over IPv6 |
+| `LLM_BASE_URL`    | yes\*    | OpenAI-compatible upstream, including `/v1` (e.g. `https://example.com/v1`) |
+| `LLM_API_KEY`     | no       | Upstream API key, sent as a bearer token |
+| `EXPOSE_UPSTREAM_MODELS` | no | `true` to also list raw upstream models in `/v1/models` |
+| `ADMIN_TOKEN`     | no       | Enables `/admin` and is the secret to log in with (32+ chars). Unset disables the admin console |
 
-More configuration (inference upstream, extensions) will arrive with later milestones.
+\* Meridian starts without it, but can't serve completions.

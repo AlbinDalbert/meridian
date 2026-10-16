@@ -49,7 +49,10 @@ defmodule Meridian.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:oban, "~> 2.24"},
-      {:req, "~> 0.7.5"}
+      {:req, "~> 0.7.5"},
+      {:phoenix_html, "~> 4.3"},
+      {:phoenix_live_view, "~> 1.2"},
+      {:lazy_html, "~> 0.1.13", only: :test}
     ]
   end
 

@@ -1,6 +1,12 @@
 defmodule MeridianWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :meridian
 
+  # The admin console's LiveView socket. It lives under /admin so it receives the admin session
+  # cookie, which is scoped to that path.
+  socket "/admin/live", Phoenix.LiveView.Socket,
+    websocket: [connect_info: [session: MeridianWeb.AdminAuth.session_options()]],
+    longpoll: false
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),
@@ -12,6 +18,18 @@ defmodule MeridianWeb.Endpoint do
     gzip: not code_reloading?,
     only: MeridianWeb.static_paths(),
     raise_on_missing_only: code_reloading?
+
+  # The admin console's JavaScript is served straight from the dependencies, so there is no
+  # asset build step.
+  plug Plug.Static,
+    at: "/assets/vendor",
+    from: {:phoenix, "priv/static"},
+    only: ~w(phoenix.min.js)
+
+  plug Plug.Static,
+    at: "/assets/vendor",
+    from: {:phoenix_live_view, "priv/static"},
+    only: ~w(phoenix_live_view.min.js)
 
   # Probes go before request logging/telemetry so they don't flood the logs.
   plug MeridianWeb.Plugs.Health
@@ -27,7 +45,7 @@ defmodule MeridianWeb.Endpoint do
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug Plug.Parsers,
-    parsers: [:json],
+    parsers: [:urlencoded, :json],
     pass: ["application/json"],
     json_decoder: Phoenix.json_library()
 

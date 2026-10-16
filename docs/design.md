@@ -490,7 +490,7 @@ Each slice should end with something usable, not just a layer.
 - Phoenix (API), Ecto, Oban, Req, health probes, Dockerfile, CI + multi-arch image, compose
   for local Postgres.
 
-**Slice 1: usable persona proxy.** *Done when: pi (or any OpenAI client) talks to an upstream
+**Slice 1: usable persona proxy.** ✅ *Done when: pi (or any OpenAI client) talks to an upstream
 model through Meridian, using a persona.*
 
 1. Admin UI skeleton: LiveView plumbing, `ADMIN_TOKEN` login.
@@ -546,6 +546,13 @@ Add an entry whenever a decision is made or reversed.
 | **Admin UI is LiveView in the same release** | Separate SPA (e.g. TS) | One deployable, no extra API client or CORS. The live run view subscribes to the same PubSub topics as clients. No Node toolchain: the LiveView JS can be served from the dependency. |
 | **Admin auth via deployment secret `ADMIN_TOKEN`** | Admin scope on user API keys, user passwords | Operating the instance and using it are different roles with different credentials. Also removes the need for a bootstrap command. |
 | **Generic and environment-agnostic** | Assuming a specific inference server or cluster | Public project. Everything deployment-specific comes from env vars; deployment values live in the operator's own infrastructure repo. |
+| **Persona resolution on `/v1`**: `meridian/<slug>` → that persona (404 if unknown or not allowed); a raw upstream id → passthrough when `EXPOSE_UPSTREAM_MODELS`; anything else → the key's `default_persona`, else the user's default persona | Rejecting unknown models; falling back for unknown `meridian/` slugs too | Clients with a hardcoded model name (`gpt-4o`) still work, but a typo in an explicit persona id fails loudly instead of silently using the wrong persona. |
+| **Persona system prompt goes first, merged into the client's leading system/developer message** | A separate extra system message; appending after the client's | Some chat templates reject more than one system message or one that isn't first. The persona's identity comes before the client's (e.g. a coding agent's) instructions. |
+| **Persona params are defaults; client values win** | Persona params override the client | Clients tune per-request (e.g. temperature for tool calls); personas set sensible defaults. `model` and `messages` can't be persona params. |
+| **`/v1` relays the upstream response byte-for-byte** (status, content type, body; one path for streaming and non-streaming) | Parsing SSE and re-encoding; rewriting `model` in responses | Dead simple and transparent. Upstream errors reach the client unchanged. A client disconnect fails the next write, which cancels the upstream request. |
+| **Upstream model list cached for 60 s** (validation and `/v1/models`) | No cache; long cache | Partly answers open question 6. Short enough that new upstream models show up quickly. |
+| **The default persona's model is chosen when creating a user** | A `DEFAULT_MODEL` env var; personas with no model | Every user needs a working default persona immediately, and there's no deployment-wide "right" model. |
+| **Admin UI has no asset build**: hand-written CSS, Phoenix/LiveView JS served from the deps | Tailwind/esbuild | No Node or asset toolchain for a small operator console. Lets the CSP forbid inline scripts. |
 | **Multi-arch images built on native runners** | QEMU emulation | Deployments may mix amd64 and arm64 nodes. Native arm64 GitHub runners are much faster than emulation. |
 
 ## Open questions
@@ -561,5 +568,5 @@ Add an entry whenever a decision is made or reversed.
    `run_start`), or does the pipeline checkpoint it along with steps?
 5. **Ordering and conflicts.** Is priority + registration order enough, or do extensions need to
    declare dependencies on each other?
-6. **Persona model validation cache.** How long to cache upstream `/v1/models`, and should
-   personas whose model disappears be flagged?
+6. **Persona model validation cache.** ~~How long to cache upstream `/v1/models`~~ (60 s), and
+   should personas whose model disappears be flagged?

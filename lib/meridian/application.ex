@@ -13,6 +13,7 @@ defmodule Meridian.Application do
       {DNSCluster, query: Application.get_env(:meridian, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Meridian.PubSub},
       {Oban, Application.fetch_env!(:meridian, Oban)},
+      Meridian.Upstream.ModelCache,
       # Start to serve requests, typically the last entry
       MeridianWeb.Endpoint
     ]

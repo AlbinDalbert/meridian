@@ -35,4 +35,21 @@ defmodule MeridianWeb.ConnCase do
     Meridian.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
+
+  @doc """
+  Logs `conn` into the admin console with the configured `ADMIN_TOKEN`.
+
+      setup :log_in_admin
+  """
+  def log_in_admin(%{conn: conn}) do
+    token = Application.fetch_env!(:meridian, :admin_token)
+
+    conn =
+      Phoenix.ConnTest.dispatch(conn, MeridianWeb.Endpoint, :post, "/admin/login", %{
+        "token" => token
+      })
+
+    # Recycling carries the session cookie over to the next request.
+    %{conn: Phoenix.ConnTest.recycle(conn)}
+  end
 end
