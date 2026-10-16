@@ -168,3 +168,37 @@ dl.details dd { margin: 0; }
 
 .section-header { margin: 2.5rem 0 1rem; }
 .section-header h2 { margin: 0; }
+
+/* Threads and runs */
+.status-queued, .status-running { color: var(--accent); border-color: var(--accent); }
+.status-completed { color: var(--text); }
+.status-failed { color: var(--danger); border-color: var(--danger); }
+.error-text { color: var(--danger); }
+
+pre.text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+}
+pre.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+}
+details { margin-bottom: 0.75rem; }
+details summary { cursor: pointer; margin-bottom: 0.5rem; }
+.cursor { color: var(--accent); }
+
+.messages { display: flex; flex-direction: column; gap: 0.75rem; }
+.message {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1.25rem 1rem;
+}
+.message-user { border-left: 3px solid var(--accent); }
+.message header { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.85rem; }
+
+code.payload { word-break: break-all; font-size: 0.8em; }

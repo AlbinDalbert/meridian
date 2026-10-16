@@ -51,4 +51,19 @@ defmodule Meridian.Personas.Persona do
   """
   def slug_from_model_id(@model_prefix <> slug) when slug != "", do: {:ok, slug}
   def slug_from_model_id(_model_id), do: :error
+
+  @snapshot_fields ~w(id slug name system_prompt model params extensions)a
+
+  @doc """
+  The persona's configuration as a plain map, for freezing into a run (`runs.persona_snapshot`).
+  """
+  def snapshot(%__MODULE__{} = persona) do
+    Map.new(@snapshot_fields, fn field -> {Atom.to_string(field), Map.fetch!(persona, field)} end)
+  end
+
+  @doc "Rebuilds a (non-persisted) persona from `snapshot/1`."
+  def from_snapshot(%{} = snapshot) do
+    fields = for field <- @snapshot_fields, do: {field, Map.get(snapshot, Atom.to_string(field))}
+    struct!(__MODULE__, fields)
+  end
 end

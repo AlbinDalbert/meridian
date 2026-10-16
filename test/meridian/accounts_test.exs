@@ -11,7 +11,9 @@ defmodule Meridian.AccountsTest do
       assert {:ok, user} =
                Accounts.create_user(
                  %{"name" => "Ada", "email" => "ada@example.com"},
-                 %{"model" => "m1"}, force: true)
+                 %{"model" => "m1"},
+                 force: true
+               )
 
       assert [persona] = Personas.list_personas(user)
       assert %{slug: "default", model: "m1", is_default: true} = persona
@@ -44,7 +46,9 @@ defmodule Meridian.AccountsTest do
       assert {:error, :user, changeset} =
                Accounts.create_user(
                  %{"name" => "Ada", "email" => "ADA@example.com"},
-                 %{"model" => "m"}, force: true)
+                 %{"model" => "m"},
+                 force: true
+               )
 
       assert "has already been taken" in errors_on(changeset).email
     end

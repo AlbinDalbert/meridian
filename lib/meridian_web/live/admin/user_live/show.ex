@@ -1,7 +1,7 @@
 defmodule MeridianWeb.Admin.UserLive.Show do
   use MeridianWeb, :live_view
 
-  alias Meridian.{Accounts, Personas}
+  alias Meridian.{Accounts, Personas, Threads}
   alias Meridian.Accounts.ApiKey.Policy
   alias Meridian.Personas.Persona
 
@@ -17,7 +17,12 @@ defmodule MeridianWeb.Admin.UserLive.Show do
 
   defp load_children(socket) do
     user = socket.assigns.user
-    assign(socket, personas: Personas.list_personas(user), api_keys: Accounts.list_api_keys(user))
+
+    assign(socket,
+      personas: Personas.list_personas(user),
+      api_keys: Accounts.list_api_keys(user),
+      threads: Threads.list_threads(user)
+    )
   end
 
   @impl true
@@ -117,6 +122,20 @@ defmodule MeridianWeb.Admin.UserLive.Show do
             Revoke
           </button>
         </:action>
+      </.table>
+
+      <.header level={2}>
+        Threads
+        <:subtitle>Conversations on the native API, most recently active first.</:subtitle>
+      </.header>
+      <.table id="threads" rows={@threads} empty="No threads yet.">
+        <:col :let={thread} label="Title">
+          <.link navigate={~p"/admin/threads/#{thread}"}>{thread.title || "Untitled"}</.link>
+        </:col>
+        <:col :let={thread} label="Persona">
+          <code :if={thread.persona}>{Persona.model_id(thread.persona)}</code>
+        </:col>
+        <:col :let={thread} label="Last active">{format_time(thread.updated_at)}</:col>
       </.table>
     </Layouts.app>
     """

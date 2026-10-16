@@ -66,7 +66,9 @@ defmodule Meridian.ProxyTest do
             "model" => "qwen",
             "system_prompt" => "You are terse.",
             "params" => %{"temperature" => 0.2, "max_tokens" => 100}
-          }, force: true)
+          },
+          force: true
+        )
 
       %{coder: coder}
     end

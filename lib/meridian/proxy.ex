@@ -57,13 +57,13 @@ defmodule Meridian.Proxy do
   def resolve_model(%User{} = user, %Policy{} = policy, model) do
     case Persona.slug_from_model_id(model) do
       {:ok, slug} ->
-        user |> Personas.get_persona_by_slug(slug) |> allowed(policy)
+        user |> Personas.resolve_persona(policy, slug) |> model_result()
 
       :error ->
         if upstream_model?(model) do
           {:ok, {:upstream, model}}
         else
-          user |> default_persona(policy) |> allowed(policy)
+          user |> Personas.resolve_persona(policy, nil) |> model_result()
         end
     end
   end
@@ -73,60 +73,20 @@ defmodule Meridian.Proxy do
       Upstream.model_available?(model) == {:ok, true}
   end
 
-  defp default_persona(user, %Policy{default_persona: nil}),
-    do: Personas.get_default_persona(user)
-
-  defp default_persona(user, %Policy{default_persona: slug}),
-    do: Personas.get_persona_by_slug(user, slug)
-
-  defp allowed(%Persona{} = persona, policy) do
-    if Policy.allows?(policy, persona.slug),
-      do: {:ok, {:persona, persona}},
-      else: {:error, :model_not_found}
-  end
-
-  defp allowed(nil, _policy), do: {:error, :model_not_found}
+  defp model_result({:ok, persona}), do: {:ok, {:persona, persona}}
+  defp model_result({:error, :persona_not_found}), do: {:error, :model_not_found}
 
   @doc """
   Builds the upstream request body for a client request.
 
-  For a persona: the persona's params are defaults the client can override, the model is
-  replaced with the persona's upstream model, and the persona's system prompt goes before the
-  client's (merged into the client's leading system message, if there is one, since some chat
-  templates only accept a single system message). Raw upstream models pass through untouched.
+  For a persona, see `Meridian.Personas.apply_to_request/2`. Raw upstream models pass through
+  untouched.
   """
   @spec build_request(model(), map()) :: map()
   def build_request({:upstream, _model}, body), do: body
 
-  def build_request({:persona, %Persona{} = persona}, body) do
-    persona.params
-    |> Map.merge(body)
-    |> Map.put("model", persona.model)
-    |> Map.update("messages", [], &put_system_prompt(&1, persona.system_prompt))
-  end
-
-  defp put_system_prompt(messages, prompt) when prompt in [nil, ""], do: messages
-
-  defp put_system_prompt([%{"role" => role, "content" => content} = first | rest], prompt)
-       when role in ["system", "developer"] do
-    case content do
-      text when is_binary(text) ->
-        [%{first | "content" => prompt <> "\n\n" <> text} | rest]
-
-      parts when is_list(parts) ->
-        [%{first | "content" => [%{"type" => "text", "text" => prompt} | parts]} | rest]
-
-      _ ->
-        [%{"role" => "system", "content" => prompt}, first | rest]
-    end
-  end
-
-  defp put_system_prompt(messages, prompt) when is_list(messages) do
-    [%{"role" => "system", "content" => prompt} | messages]
-  end
-
-  # Not a valid message list; leave it for the upstream to reject.
-  defp put_system_prompt(messages, _prompt), do: messages
+  def build_request({:persona, %Persona{} = persona}, body),
+    do: Personas.apply_to_request(persona, body)
 
   defp expose_upstream_models?, do: Upstream.config(:expose_models, false) == true
 end

@@ -12,8 +12,11 @@ defmodule Meridian.Application do
       Meridian.Repo,
       {DNSCluster, query: Application.get_env(:meridian, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Meridian.PubSub},
-      {Oban, Application.fetch_env!(:meridian, Oban)},
       Meridian.Upstream.ModelCache,
+      {Registry, keys: :unique, name: Meridian.Runs.Registry},
+      {DynamicSupervisor, name: Meridian.Runs.Supervisor, strategy: :one_for_one},
+      # After the run supervisor, so on shutdown Oban stops (and stops taking runs) first.
+      {Oban, Application.fetch_env!(:meridian, Oban)},
       # Start to serve requests, typically the last entry
       MeridianWeb.Endpoint
     ]

@@ -41,6 +41,24 @@ Then open `http://localhost:4000/admin`, log in with the token, create a user (t
 their `meridian/default` persona), and mint an API key. Point any OpenAI client at
 `http://localhost:4000/v1` with that key and pick a persona as the model.
 
+The native API keeps the conversation on the server. A reply keeps generating if the client
+goes away; reconnect to the event stream to pick up where you left off:
+
+```sh
+KEY=mrd_...   # an API key minted in the admin console
+THREAD=$(curl -s -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"title": "Hello"}' localhost:4000/api/threads | jq -r .data.id)
+RUN=$(curl -s -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"content": "Hi!"}' localhost:4000/api/threads/$THREAD/messages | jq -r .data.run.id)
+curl -N -H "authorization: Bearer $KEY" localhost:4000/api/runs/$RUN/events   # SSE
+# Resume after the last event you saw with `Last-Event-ID: <id>` or `?after=<id>`.
+curl -s -H "authorization: Bearer $KEY" localhost:4000/api/threads/$THREAD/messages
+```
+
+Other endpoints: `GET/PATCH/DELETE /api/threads/:id`, `GET /api/runs/:id`, and
+`POST /api/runs/:id/cancel`. The admin console shows threads and runs, including a live view
+of a run as it generates.
+
 Before committing, run `mix precommit` (warnings as errors, unused deps, format, tests).
 
 Health probes: `GET /healthz` (liveness) and `GET /readyz` (database reachable).

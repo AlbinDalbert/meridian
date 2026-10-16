@@ -74,6 +74,7 @@ defmodule MeridianWeb do
     quote do
       import Phoenix.HTML
       import MeridianWeb.CoreComponents
+      import MeridianWeb.RunComponents
 
       alias Phoenix.LiveView.JS
       alias MeridianWeb.Layouts

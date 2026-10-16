@@ -1,0 +1,22 @@
+defmodule MeridianWeb.Api.ThreadJSON do
+  alias Meridian.Personas.Persona
+  alias Meridian.Threads.Thread
+  alias MeridianWeb.Api.RunJSON
+
+  def index(%{threads: threads}), do: %{data: Enum.map(threads, &data/1)}
+
+  def show(%{thread: thread} = assigns) do
+    active_run = if run = assigns[:active_run], do: RunJSON.data(run)
+    %{data: Map.put(data(thread), :active_run, active_run)}
+  end
+
+  def data(%Thread{} = thread) do
+    %{
+      id: thread.id,
+      title: thread.title,
+      persona: thread.persona && Persona.model_id(thread.persona),
+      inserted_at: thread.inserted_at,
+      updated_at: thread.updated_at
+    }
+  end
+end

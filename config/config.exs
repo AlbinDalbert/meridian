@@ -14,8 +14,20 @@ config :meridian,
 config :meridian, Oban,
   engine: Oban.Engines.Basic,
   repo: Meridian.Repo,
-  queues: [default: 10],
-  plugins: [{Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7}]
+  queues: [default: 10, runs: 50],
+  plugins: [
+    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
+    # Jobs of a node that died are left "executing"; this discards them (runs aren't retried).
+    {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(30)},
+    {Oban.Plugins.Cron, crontab: [{"* * * * *", Meridian.Runs.Janitor}]}
+  ]
+
+# Run execution tuning (milliseconds). See Meridian.Runs.RunServer.
+config :meridian, Meridian.Runs,
+  delta_flush_interval: 100,
+  heartbeat_interval: :timer.seconds(10),
+  stale_after: :timer.seconds(60),
+  idle_timeout: :timer.minutes(5)
 
 # Configure the endpoint
 config :meridian, MeridianWeb.Endpoint,

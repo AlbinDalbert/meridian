@@ -28,6 +28,9 @@ config :meridian, Meridian.Upstream,
 
 config :meridian, :admin_token, "test-admin-token-0123456789abcdefghijklmnopqrstuvwxyz"
 
+# One message.delta event per upstream chunk, so tests are deterministic.
+config :meridian, Meridian.Runs, delta_flush_interval: 0
+
 # Jobs are executed explicitly in tests (see Oban.Testing)
 config :meridian, Oban, testing: :manual
 

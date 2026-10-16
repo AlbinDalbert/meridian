@@ -3,8 +3,15 @@ defmodule MeridianWeb.Router do
 
   import MeridianWeb.AdminAuth, only: [require_admin_enabled: 2, require_admin: 2]
 
+  # The native API. Authenticated like /v1; errors use the same shape.
   pipeline :api do
     plug :accepts, ["json"]
+    plug MeridianWeb.Plugs.ApiKeyAuth
+  end
+
+  # Server-sent event streams. No `accepts`: clients send `Accept: text/event-stream`.
+  pipeline :api_stream do
+    plug MeridianWeb.Plugs.ApiKeyAuth
   end
 
   # The OpenAI-compatible surface. No `accepts` here: OpenAI clients send all sorts of Accept
@@ -37,8 +44,20 @@ defmodule MeridianWeb.Router do
     post "/chat/completions", ChatCompletionController, :create
   end
 
-  scope "/api", MeridianWeb do
+  scope "/api", MeridianWeb.Api do
     pipe_through :api
+
+    resources "/threads", ThreadController, except: [:new, :edit]
+    get "/threads/:thread_id/messages", MessageController, :index
+    post "/threads/:thread_id/messages", MessageController, :create
+    get "/runs/:id", RunController, :show
+    post "/runs/:id/cancel", RunController, :cancel
+  end
+
+  scope "/api", MeridianWeb.Api do
+    pipe_through :api_stream
+
+    get "/runs/:id/events", RunEventController, :index
   end
 
   scope "/admin", MeridianWeb.Admin do
@@ -63,6 +82,9 @@ defmodule MeridianWeb.Router do
       live "/keys/:id/edit", ApiKeyLive.Form, :edit
       live "/users/:user_id/personas/new", PersonaLive.Form, :new
       live "/personas/:id/edit", PersonaLive.Form, :edit
+      live "/threads/:id", ThreadLive.Show, :show
+      live "/runs", RunLive.Index, :index
+      live "/runs/:id", RunLive.Show, :show
     end
   end
 end

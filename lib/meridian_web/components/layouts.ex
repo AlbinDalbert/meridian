@@ -40,6 +40,7 @@ defmodule MeridianWeb.Layouts do
     <nav class="topbar">
       <a href={~p"/admin/users"} class="brand">Meridian</a>
       <.link :if={@signed_in} navigate={~p"/admin/users"}>Users</.link>
+      <.link :if={@signed_in} navigate={~p"/admin/runs"}>Runs</.link>
       <.form :if={@signed_in} for={%{}} action={~p"/admin/logout"} method="post" class="logout">
         <button type="submit" class="link">Log out</button>
       </.form>
