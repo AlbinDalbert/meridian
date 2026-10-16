@@ -6,6 +6,8 @@ Read `docs/design.md` before making architectural changes.
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 - Never hardcode deployment-specific values (hosts, URLs, credentials); everything environment-specific comes from env vars in `config/runtime.exs`
+- Keep the domain/web boundary: `lib/meridian/` is the domain (data, business logic, runs, extensions) and must never depend on `lib/meridian_web/` (HTTP, LiveView, plugs). The web layer calls into the domain, never the other way around
+- When a design decision is made or reversed, record it in the decision log in `docs/design.md`
 
 <!-- usage-rules-start -->
 
