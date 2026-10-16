@@ -1,6 +1,10 @@
 # Meridian — Design
 
 > Status: draft / v0 planning. Nothing here is final; open questions are collected at the end.
+>
+> This document is a **direction, not a spec**. We build in thin, usable slices and let real
+> features pull abstractions into existence. When the code and this doc disagree, we update
+> whichever one is wrong, deliberately.
 
 Meridian is a self-hostable **agent layer** that sits between clients and any OpenAI-compatible
 inference endpoint. It owns identity, conversations, personas, and the agent run lifecycle, and
@@ -40,7 +44,7 @@ From a client's point of view Meridian looks like an inference endpoint. The dif
 | Concern            | Choice                                   |
 |--------------------|------------------------------------------|
 | Language / runtime | Elixir on the BEAM (OTP)                 |
-| Web                | Phoenix (API + Channels; LiveView admin later, maybe) |
+| Web                | Phoenix (API + Channels), LiveView for the admin UI |
 | Database           | PostgreSQL (+ `pgvector` available for extensions that want it) |
 | Jobs / queue       | Oban (Postgres-backed)                   |
 | Fan-out            | Phoenix.PubSub                           |
@@ -57,9 +61,11 @@ flowchart LR
     subgraph Clients
         C1[Generic OpenAI client<br/>chat UI, coding agent]
         C2[First-party client]
+        C3[Operator's browser]
     end
 
     subgraph Meridian
+        Admin["/admin<br/>LiveView"]
         Auth[Auth<br/>API key → user + policy]
         Compat["/v1/* <br/>stateless surface"]
         Native["/api/* + /socket <br/>stateful surface"]
@@ -82,6 +88,8 @@ flowchart LR
     Runs --> DB
     Ext --> DB
     Oban --> DB
+    C3 --> Admin --> DB
+    Admin -.-> PubSub
 ```
 
 ## The two surfaces
@@ -144,6 +152,33 @@ bidirectional communication on one connection.
 
 A future option is to also expose this surface as the **OpenAI Responses API**
 (`previous_response_id`, `background: true`), which maps closely onto threads + runs.
+
+## Admin UI
+
+A small **LiveView** app mounted at `/admin`, inside the same release. It is an operator console,
+not a chat client.
+
+- **Manage**: users, API keys (mint / revoke), personas.
+- **Observe**: threads and runs (read-only), including a **live run view**. LiveView subscribes
+  to the same PubSub topics as API clients, so you can watch events, tool calls, and hook activity
+  as a run happens. This is the main debugging tool for runs and extensions.
+- **Extensions** can mount their own admin pages (e.g. a memory browser).
+
+### Admin authentication
+
+Admin access belongs to the **operator of the deployment**, not to a Meridian user, so it uses a
+separate credential:
+
+- `ADMIN_TOKEN`: a long random secret provided by the deployment (e.g. a Kubernetes Secret,
+  generated with `openssl rand -base64 48`). If it is unset, `/admin` is disabled entirely.
+- Login form: paste the token → constant-time compare → a signed, short-lived session cookie
+  scoped to `/admin`. Cookie sessions exist only in the admin pipeline; the APIs stay
+  API-key-only.
+- Rotating the secret and restarting invalidates admin access (sessions also carry a hash of
+  the token, so old cookies stop working once the token changes).
+
+This also solves bootstrapping: the operator creates the first user and API key from the admin
+UI, so no special bootstrap command is needed. OIDC can replace or supplement the token later.
 
 ## Runs: the durable execution model
 
@@ -241,6 +276,12 @@ If memory, skills, and title generation can be written as extensions, the API is
 things we haven't thought of. If one of them needs to reach into the core, the API is missing
 something and we fix the API, not add a special case.
 
+And the rule that keeps the extension API from becoming speculative:
+
+> **A hook or capability is added when a real extension needs it.** The tables below are the
+> candidate list, not a build list. The first extension (title generation) needs roughly
+> `run_end` + background jobs + `emit`, so that is all v0 implements.
+
 ### What an extension can do
 
 Modeled on pi's extension API, minus the client/UI parts (Meridian is a server):
@@ -254,6 +295,7 @@ Modeled on pi's extension API, minus the client/UI parts (Meridian is a server):
 | Own data                  | Its own Ecto migrations/tables, prefixed `ext_<name>_` |
 | Background work           | Register Oban workers and cron entries |
 | Expose an API             | Mount routes under `/api/ext/<name>/` |
+| Admin pages               | Mount LiveViews under `/admin/ext/<name>/` |
 | Configuration             | Declare a config schema; values come from deploy config, overridable per persona and per API key |
 | Talk to other extensions  | Extension-scoped PubSub topics |
 
@@ -317,11 +359,13 @@ permissions and see everything. Remote extensions see only what their hook subsc
 
 ## Identity: users, API keys, policies
 
-- **Users** are generic: id, display name, optional email. v0 has no signup. The first user and
-  key are created with a release command (`bin/meridian eval "Meridian.Release.bootstrap()"`)
-  or a mix task. OIDC can come later.
-- **API keys** are minted by a user for themselves, one per client/purpose. Format
-  `mrd_<random>`, shown once, stored as a SHA-256 hash with a short visible prefix.
+- **Users** are generic: id, display name, optional email. There is no signup and no user
+  login. Users are created by the operator in the [admin UI](#admin-ui).
+- **API keys** identify a user to clients, one per client/purpose. Minted in the admin UI (and
+  later self-service via `/api/keys`). Format `mrd_<random>`, shown once, stored as a SHA-256
+  hash with a short visible prefix.
+- Two credential types, never mixed: **API keys** (users → APIs) and the **admin token**
+  (operator → `/admin`).
 - Each key carries a **policy**:
 
 ```jsonc
@@ -347,7 +391,7 @@ On create/update, the upstream model is **validated against the provider's `/v1/
 (cached briefly). Passing `force: true` skips validation, for upstreams that don't list all
 models or that are temporarily down.
 
-Personas belong to a user. A default persona is created at bootstrap.
+Personas belong to a user. A default persona is created along with each new user.
 
 ## Memory
 
@@ -411,6 +455,7 @@ is in the repo.
 | `LLM_BASE_URL`         | OpenAI-compatible upstream, e.g. `https://example.com/v1` |
 | `LLM_API_KEY`          | Upstream key (optional) |
 | `EXPOSE_UPSTREAM_MODELS` | Also list raw upstream models in `/v1/models` (default `false`) |
+| `ADMIN_TOKEN`          | Enables `/admin`; the secret used to log in. Unset = admin disabled |
 | `EXTENSIONS_DIR`       | Optional directory of `.ex` extensions compiled at boot (if we do that) |
 
 Extensions declare and read their own config.
@@ -438,17 +483,35 @@ Extensions declare and read their own config.
 
 ## Milestones
 
-**v0**
+Each slice should end with something usable, not just a layer.
 
-1. Project skeleton: Phoenix (API), Ecto, Oban, Dockerfile, CI multi-arch build, docker compose
-   for local Postgres.
-2. Users, API keys + policies, bootstrap command, auth plug.
-3. Personas with upstream model validation, `/v1/models`, `/api/models`.
-4. `/v1/chat/completions` persona proxy (streaming).
-5. Native threads/messages/runs, `RunServer`, event log, resumable SSE, cancellation.
-6. Phoenix Channels transport.
-7. Extension API + hook pipeline, with **title generation** as the first built-in extension (small
-   and exercises `run_end`, Oban, and `emit`).
+**Slice 0: skeleton** ✅
+
+- Phoenix (API), Ecto, Oban, Req, health probes, Dockerfile, CI + multi-arch image, compose
+  for local Postgres.
+
+**Slice 1: usable persona proxy.** *Done when: pi (or any OpenAI client) talks to an upstream
+model through Meridian, using a persona.*
+
+1. Admin UI skeleton: LiveView plumbing, `ADMIN_TOKEN` login.
+2. Users + API keys (schemas, admin pages, API-key auth plug).
+3. Upstream client (`/v1/models`, streaming chat completions via Req).
+4. Personas (schema, admin pages, upstream model validation with `force`).
+5. `/v1/models` + `/v1/chat/completions` persona proxy (streaming).
+
+**Slice 2: durable conversations.** *Done when: a first-party client can send a message, quit,
+reconnect, and see the full reply.*
+
+1. Threads, messages, runs, `RunServer`, event log.
+2. REST + resumable SSE, cancellation.
+3. Live run view in the admin UI.
+
+**Slice 3: extensions.** *Done when: thread titles are generated by an extension using only the
+public extension API.*
+
+1. Minimal extension behaviour + only the hooks title generation needs.
+2. Title generation extension.
+3. Phoenix Channels transport (can move earlier if the first-party client wants it).
 
 **Next**
 
@@ -461,7 +524,7 @@ Extensions declare and read their own config.
 
 - `EXTENSIONS_DIR` runtime loading, remote extensions, maybe WASM
 - Responses API surface
-- OIDC login, LiveView admin UI
+- OIDC login for admin (and maybe users)
 - Scheduled runs
 
 ## Open questions
