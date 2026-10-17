@@ -49,10 +49,10 @@ body {
   gap: 14px;
   user-select: none;
 }
-.mark { display: block; fill: none; stroke-width: 1.25; }
-.mark .globe { stroke: var(--accent); }
-.mark .meridian { stroke: var(--accent-strong); }
-.mark .parallel { stroke: var(--text-dim); }
+.mark { display: block; }
+.mark .ring { fill: var(--accent); }
+.mark .night { fill: var(--border); }
+.mark .day { fill: var(--accent-strong); }
 .word {
   margin-top: 4px;
   color: var(--accent);

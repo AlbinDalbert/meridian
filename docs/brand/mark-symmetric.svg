@@ -1,0 +1,17 @@
+<!-- Meridian's earlier mark, kept in case we go back to it: a globe with a pair of meridians cut
+     out of it, the lens between them in the lighter amber. Colors are xebec's palette (accent,
+     accent-strong). To use it again, see `mark/1` in
+     lib/meridian_web/controllers/me/access_request_html.ex. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="64" height="64">
+  <defs>
+    <mask id="mark-meridians">
+      <circle cx="8" cy="8" r="7" fill="#fff"/>
+      <ellipse cx="8" cy="8" rx="3.4" ry="7.5" fill="none" stroke="#000" stroke-width="1"/>
+    </mask>
+    <clipPath id="mark-lens">
+      <ellipse cx="8" cy="8" rx="3.4" ry="7.5"/>
+    </clipPath>
+  </defs>
+  <circle cx="8" cy="8" r="7" fill="#dfa13d" mask="url(#mark-meridians)"/>
+  <circle cx="8" cy="8" r="7" fill="#f2c96f" mask="url(#mark-meridians)" clip-path="url(#mark-lens)"/>
+</svg>

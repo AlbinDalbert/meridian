@@ -60,13 +60,20 @@ defmodule MeridianWeb.Me.AccessRequestHTML do
 
   defp errors(field), do: Enum.map(field.errors, &translate_error/1)
 
-  # Meridian's mark: a globe and its meridian.
+  # Meridian's mark: a globe, its night side under the meridian ring of a desk globe, tilted
+  # like the Earth (23.4°). The ring spans 140° around the tilted axis; the lit side faces away
+  # from it, with the terminator curving into the night. The earlier, symmetric mark is kept in
+  # docs/brand/mark-symmetric.svg.
   defp mark(assigns) do
     ~H"""
-    <svg class="mark" viewBox="0 0 16 16" width="64" height="64" aria-hidden="true">
-      <circle class="globe" cx="8" cy="8" r="6.5" />
-      <line class="parallel" x1="1.5" y1="8" x2="14.5" y2="8" />
-      <ellipse class="meridian" cx="8" cy="8" rx="2.75" ry="6.5" />
+    <svg class="mark" viewBox="0 0 16 16" width="88" height="88" aria-hidden="true">
+      <path class="ring" d="M2.62 2.92 A7.4 7.4 0 0 1 15.39 8.44 L13.59 8.33 A5.6 5.6 0 0 0 3.93 4.15 Z" />
+      <circle class="night" cx="8" cy="8" r="4.6" />
+      <path
+        class="day"
+        transform="rotate(113.4 8 8)"
+        d="M8 3.4 A4.6 4.6 0 0 1 8 12.6 A1.38 4.6 0 0 1 8 3.4 Z"
+      />
     </svg>
     """
   end
