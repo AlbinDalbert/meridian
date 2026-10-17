@@ -1,6 +1,7 @@
 defmodule MeridianWeb.RunComponents do
   @moduledoc """
-  Components for showing threads and runs in the admin console.
+  Components for showing runs in the admin console: only what happened and how much it cost,
+  never what was said (no thread titles, personas, or messages).
   """
   use Phoenix.Component
 
@@ -20,10 +21,10 @@ defmodule MeridianWeb.RunComponents do
     """
   end
 
-  @doc "A table of runs. With `show_thread`, the runs' threads (and users) must be preloaded."
+  @doc "A table of runs. With `show_user`, the runs' threads and their users must be preloaded."
   attr :id, :string, required: true
   attr :runs, :list, required: true
-  attr :show_thread, :boolean, default: false
+  attr :show_user, :boolean, default: false
 
   def run_table(assigns) do
     ~H"""
@@ -31,11 +32,8 @@ defmodule MeridianWeb.RunComponents do
       <:col :let={run} label="Run">
         <.link navigate={~p"/admin/runs/#{run}"}><code>{String.slice(run.id, -8, 8)}</code></.link>
       </:col>
-      <:col :let={run} :if={@show_thread} label="Thread">
-        <.link navigate={~p"/admin/threads/#{run.thread}"}>
-          {run.thread.title || "Untitled"}
-        </.link>
-        <span class="muted">· {run.thread.user.name}</span>
+      <:col :let={run} :if={@show_user} label="User">
+        <.link navigate={~p"/admin/users/#{run.thread.user}"}>{run.thread.user.name}</.link>
       </:col>
       <:col :let={run} label="Status"><.run_status status={run.status} /></:col>
       <:col :let={run} label="Model"><code>{run.model}</code></:col>

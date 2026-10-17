@@ -10,57 +10,68 @@ defmodule MeridianWeb.Admin.RunLiveTest do
   setup :log_in_admin
 
   setup do
-    user = user_fixture(%{"name" => "Ada"})
+    user = user_fixture(%{"name" => "Ada"}, %{"slug" => "secret-persona"})
     thread = thread_fixture(user, %{"title" => "Trip plans"})
     {message, run} = message_fixture(thread, "Where to?")
     %{user: user, thread: thread, message: message, run: run}
   end
 
-  test "the run view follows a run live", %{conn: conn, run: run} do
+  # Nothing the user said, or what their thread or persona is called, ever reaches the console.
+  defp refute_conversation(html) do
+    for private <- ["Where to?", "To the mountains", "Trip plans", "secret-persona"],
+        do: refute(html =~ private, "the admin console shows #{inspect(private)}")
+  end
+
+  test "the run view follows a run live, without its contents", %{conn: conn, run: run} do
     {:ok, lv, html} = live(conn, ~p"/admin/runs/#{run}")
     assert html =~ "queued"
-    assert html =~ "Where to?"
+    assert html =~ "Ada"
+    refute_conversation(html)
 
     stub_upstream_stream(completion_events(["To the ", "mountains."]))
     :ok = perform_job(Worker, %{"run_id" => run.id})
 
     html = render(lv)
-    assert lv |> element("#run-text") |> render() =~ "To the mountains."
     assert html =~ "completed"
-    assert html =~ "run.completed"
+    assert has_element?(lv, "#events tr", "message.delta")
+    assert has_element?(lv, "#events tr", "run.completed")
     assert html =~ "5 in / 2 out"
+    refute_conversation(html)
   end
 
-  test "the run view replays a finished run", %{conn: conn, run: run} do
-    stub_upstream_stream(completion_events(["Done."]))
+  test "the run view replays a finished run, without its contents", %{conn: conn, run: run} do
+    stub_upstream_stream(completion_events(["To the mountains."]))
     :ok = perform_job(Worker, %{"run_id" => run.id})
 
-    {:ok, lv, _html} = live(conn, ~p"/admin/runs/#{run}")
-    assert lv |> element("#run-text") |> render() =~ "Done."
+    {:ok, lv, html} = live(conn, ~p"/admin/runs/#{run}")
     assert has_element?(lv, "#events tr", "message.completed")
+    refute_conversation(html)
   end
 
-  test "the thread view shows messages and updates when a run ends", %{
-    conn: conn,
-    thread: thread,
-    run: run
-  } do
-    {:ok, lv, html} = live(conn, ~p"/admin/threads/#{thread}")
-    assert html =~ "Trip plans"
-    assert html =~ "Where to?"
-
-    stub_upstream_stream(completion_events(["The coast."]))
+  test "the runs page shows who ran what, not what was said", %{conn: conn, run: run} do
+    stub_upstream_stream(completion_events(["To the mountains."]))
     :ok = perform_job(Worker, %{"run_id" => run.id})
 
-    assert render(lv) =~ "The coast."
+    {:ok, _lv, html} = live(conn, ~p"/admin/runs")
+    assert html =~ "Ada"
+    assert html =~ "5 in / 2 out"
+    refute_conversation(html)
   end
 
-  test "the runs page and user page link to runs and threads", %{conn: conn, user: user} do
-    {:ok, _lv, html} = live(conn, ~p"/admin/runs")
-    assert html =~ "Trip plans"
-    assert html =~ "Ada"
+  test "the user page shows activity, not threads", %{conn: conn, user: user, run: run} do
+    stub_upstream_stream(completion_events(["To the mountains."]))
+    :ok = perform_job(Worker, %{"run_id" => run.id})
 
-    {:ok, _lv, html} = live(conn, ~p"/admin/users/#{user}")
-    assert html =~ "Trip plans"
+    {:ok, lv, html} = live(conn, ~p"/admin/users/#{user}")
+    activity = lv |> element("#activity") |> render()
+    assert activity =~ ~r/Threads<\/dt>\s*<dd>1</
+    assert activity =~ ~r/Messages<\/dt>\s*<dd>2</
+    assert activity =~ "5 in / 2 out"
+    refute html =~ "Trip plans"
+    refute html =~ "Where to?"
+  end
+
+  test "there is no thread view", %{conn: conn, thread: thread} do
+    assert conn |> get("/admin/threads/#{thread.id}") |> response(404)
   end
 end

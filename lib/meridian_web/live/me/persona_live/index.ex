@@ -18,7 +18,7 @@ defmodule MeridianWeb.Me.PersonaLive.Index do
     ~H"""
     <Layouts.me flash={@flash} current_user={@current_user}>
       <.header>
-        Your personas
+        Your crew
         <:subtitle>
           Clients pick a persona by using its model id. Threads without one use your default.
         </:subtitle>

@@ -136,8 +136,9 @@ With WorkOS:
 
 Other endpoints: `GET /api/personas` (the personas the caller may use, as `{id, name, model,
 default}`; `id` is what threads take as `persona`), `GET/PATCH/DELETE /api/threads/:id`, `GET /api/runs/:id`, and
-`POST /api/runs/:id/cancel`. The admin console shows threads and runs, including a live view
-of a run as it generates.
+`POST /api/runs/:id/cancel`. The admin console shows how Meridian is used (per user:
+threads, messages, runs, tokens; per run: status, timings, usage, and a live log of its events
+by type), never what anyone said.
 
 Before committing, run `mix precommit` (warnings as errors, unused deps, format, tests, Dialyzer).
 

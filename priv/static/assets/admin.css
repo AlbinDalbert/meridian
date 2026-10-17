@@ -210,39 +210,14 @@ dl.details dd { margin: 0; }
 .section-header { margin: 2.5rem 0 1rem; }
 .section-header h2 { margin: 0; }
 
-/* Threads and runs */
+/* Runs */
 .status-queued, .status-running { color: var(--accent); border-color: var(--accent); }
 .status-completed { color: var(--text); }
 .status-failed { color: var(--danger); border-color: var(--danger); }
 .error-text { color: var(--danger); }
 
-pre.text {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font: inherit;
-}
-pre.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1rem 1.25rem;
-}
 details { margin-bottom: 0.75rem; }
 details summary { cursor: pointer; margin-bottom: 0.5rem; }
-.cursor { color: var(--accent); }
-
-.messages { display: flex; flex-direction: column; gap: 0.75rem; }
-.message {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 0.75rem 1.25rem 1rem;
-}
-.message-user { border-left: 3px solid var(--accent); }
-.message header { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.85rem; }
-
-code.payload { word-break: break-all; font-size: 0.8em; }
 
 /* Access requests */
 .request-list { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1.5rem; }
@@ -260,3 +235,16 @@ code.payload { word-break: break-all; font-size: 0.8em; }
 .request-email { font-weight: 600; word-break: break-all; }
 .request-name { color: var(--text); }
 .rejected { margin-top: 2.5rem; }
+
+/* A description next to a label, e.g. an extension's, in the persona form. */
+.inline-hint { color: var(--muted); font-weight: normal; }
+.inline-hint::before { content: "—"; margin: 0 0.5em; }
+
+/* The persona form's advanced settings, folded away. */
+details.advanced {
+  margin: 0.5rem 0 0;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+details.advanced summary { font-weight: 500; margin-bottom: 0; }
+details.advanced[open] summary { margin-bottom: 1rem; }

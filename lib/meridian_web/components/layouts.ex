@@ -12,7 +12,8 @@ defmodule MeridianWeb.Layouts do
       title: assigns[:page_title] || "Admin",
       title_suffix: " · Meridian admin",
       live_socket_path: "/admin/live",
-      body_class: nil
+      body_class: nil,
+      icon: "/assets/favicon-admin.svg"
     })
     |> document()
   end
@@ -24,7 +25,8 @@ defmodule MeridianWeb.Layouts do
       title: assigns[:page_title] || "Me",
       title_suffix: " · Meridian",
       live_socket_path: "/me/live",
-      body_class: "theme-me"
+      body_class: "theme-me",
+      icon: "/assets/favicon.svg"
     })
     |> document()
   end
@@ -45,6 +47,15 @@ defmodule MeridianWeb.Layouts do
         <.live_title suffix={if assigns[:theme] == "admin", do: " · Meridian admin", else: " · Meridian"}>
           {assigns[:page_title] || "Meridian"}
         </.live_title>
+        <link
+          rel="icon"
+          type="image/svg+xml"
+          href={
+            if assigns[:theme] == "admin",
+              do: ~p"/assets/favicon-admin.svg",
+              else: ~p"/assets/favicon.svg"
+          }
+        />
         <link rel="stylesheet" href={~p"/assets/public.css"} />
       </head>
       <body class={assigns[:theme] && "theme-#{assigns[:theme]}"}>
@@ -67,6 +78,7 @@ defmodule MeridianWeb.Layouts do
         <meta name="live-socket-path" content={@live_socket_path} />
         <meta name="robots" content="noindex" />
         <.live_title suffix={@title_suffix}>{@title}</.live_title>
+        <link rel="icon" type="image/svg+xml" href={@icon} />
         <link rel="stylesheet" href={~p"/assets/admin.css"} />
         <script defer src={~p"/assets/vendor/phoenix.min.js"}>
         </script>
@@ -117,7 +129,7 @@ defmodule MeridianWeb.Layouts do
     ~H"""
     <nav class="topbar">
       <a href={~p"/me"} class="brand"><.mark size={22} /><span class="brand-word">MERIDIAN</span></a>
-      <.link :if={@current_user} navigate={~p"/me"}>Personas</.link>
+      <.link :if={@current_user} navigate={~p"/me"}>Crew</.link>
       <span :if={@current_user} class="muted topbar-user">{@current_user.email}</span>
       <.form
         :if={@current_user}

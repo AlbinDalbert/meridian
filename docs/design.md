@@ -169,10 +169,15 @@ A small **LiveView** app mounted at `/admin`, inside the same release. It is an 
 not a chat client.
 
 - **Manage**: users, API keys (mint / revoke), personas.
-- **Observe**: threads and runs (read-only), including a **live run view**. LiveView subscribes
-  to the same PubSub topics as API clients, so you can watch events, tool calls, and hook activity
-  as a run happens. This is the main debugging tool for runs and extensions.
-- **Extensions** can mount their own admin pages (e.g. a memory browser).
+- **Observe**: how Meridian is used, **never what is said**. Per user: how many threads,
+  messages, and runs, the tokens used, and when they were last active. Per run: who, status,
+  upstream model, timings, usage, the error code, and a **live event log by type and time**
+  (LiveView subscribes to the same PubSub topics as API clients), which is enough to see runs
+  and extensions working. Thread titles, persona names in conversations, messages, replies, and
+  event payloads (deltas, tool calls, what extensions recalled) are never shown; there is no
+  thread view.
+- **Extensions** can mount their own admin pages, under the same rule: no conversation
+  contents (so a memory extension's admin page shows counts, not memories).
 
 ### Admin authentication
 
@@ -704,6 +709,7 @@ Add an entry whenever a decision is made or reversed.
 | **One callback per hook** | A single `handle_hook/3` | Discoverability and Dialyzer. Remote extensions get a generic form at the protocol boundary. |
 | **SSE + Phoenix Channels over one event log** | SSE only; WebSocket only | SSE for simple clients/curl, Channels for rich bidirectional clients. Neither has special semantics. |
 | **Admin UI is LiveView in the same release** | Separate SPA (e.g. TS) | One deployable, no extra API client or CORS. The live run view subscribes to the same PubSub topics as clients. No Node toolchain: the LiveView JS can be served from the dependency. |
+| **The admin console never shows conversations**: usage and run metadata only (counts, tokens, status, timings, event types); no thread view, titles, personas of threads, messages, replies, event payloads, or upstream error messages (they can quote the request) | Showing everything to the operator (the slice 2 thread and live run views); an opt-in per user | Running Meridian for friends shouldn't mean reading their chats. What the operator needs (is it working, what does it cost, who uses it) doesn't need the contents. Replaces the reply and payloads in the live run view; looking at what a run said is for the user, in their own client. |
 | **Admin auth via deployment secret `ADMIN_TOKEN`** | Admin scope on user API keys, user passwords | Operating the instance and using it are different roles with different credentials. Also removes the need for a bootstrap command. |
 | **OIDC sign-in for admin, with an `ADMIN_EMAILS` allowlist; `ADMIN_TOKEN` stays as an optional fallback** | WorkOS-specific integration (its User Management API or SDK); a proxy in front (oauth2-proxy, Cloudflare Access); token only | No long secret to keep and paste. Generic OIDC works with WorkOS AuthKit and any other provider, so deployments pick their own. The allowlist is needed because a provider only says who someone is, not that they operate this instance. Hand-rolled with Req and `:crypto` (RS256 only) instead of a JOSE dependency. |
 | ~~**Clients may authenticate with OIDC access tokens; Meridian is a resource server, not an authorization server**~~ *Amended, see "Meridian runs the login for browser apps" below* | Meridian running the login and minting its own tokens or API keys per client; cookie sessions for `/api` | Keeps one client contract (a bearer token) and keeps Meridian ignorant of clients. Clients use the provider's SDKs; Meridian only verifies. No cookies keeps the CORS reasoning intact. API keys stay for generic clients. |

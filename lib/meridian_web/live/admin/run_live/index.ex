@@ -25,7 +25,7 @@ defmodule MeridianWeb.Admin.RunLive.Index do
         <:subtitle>The {length(@runs)} most recent runs across all users. Updates live.</:subtitle>
       </.header>
 
-      <.run_table id="runs" runs={@runs} show_thread />
+      <.run_table id="runs" runs={@runs} show_user />
     </Layouts.app>
     """
   end

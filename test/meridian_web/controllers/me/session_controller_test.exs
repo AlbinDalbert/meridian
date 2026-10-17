@@ -66,7 +66,7 @@ defmodule MeridianWeb.Me.SessionControllerTest do
 
     conn = recycle(conn)
     html = conn |> get(~p"/me") |> html_response(200)
-    assert html =~ "Your personas"
+    assert html =~ "Your crew"
     assert html =~ "meridian/default"
     assert get(conn, ~p"/me/login") |> redirected_to() == ~p"/me"
 

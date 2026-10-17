@@ -113,7 +113,6 @@ defmodule MeridianWeb.Router do
       live "/keys/:id/edit", ApiKeyLive.Form, :edit
       live "/users/:user_id/personas/new", PersonaLive.Form, :new
       live "/personas/:id/edit", PersonaLive.Form, :edit
-      live "/threads/:id", ThreadLive.Show, :show
       live "/runs", RunLive.Index, :index
       live "/runs/:id", RunLive.Show, :show
     end

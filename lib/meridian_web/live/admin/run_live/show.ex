@@ -1,6 +1,9 @@
 defmodule MeridianWeb.Admin.RunLive.Show do
   @moduledoc """
-  The live run view: a run's details, its reply as it is generated, and its event log.
+  A run's details and its event log, live. For seeing that runs work and what they cost, not
+  what was said: there is no persona, no message, and no reply here, and events are shown by
+  type and time only, since their payloads carry the conversation (text deltas, tool calls,
+  what extensions recalled).
 
   Like an API client, it subscribes to the run's events first and then replays the persisted
   ones, dropping live events it already has (by `seq`).
@@ -9,7 +12,6 @@ defmodule MeridianWeb.Admin.RunLive.Show do
 
   alias Meridian.Runs
   alias Meridian.Runs.Event
-  alias Meridian.Threads.Message
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -19,7 +21,7 @@ defmodule MeridianWeb.Admin.RunLive.Show do
 
     socket =
       socket
-      |> assign(page_title: "Run", run: run, last_seq: 0, text: "", reasoning: "")
+      |> assign(page_title: "Run", run: run, last_seq: 0)
       |> stream_configure(:events, dom_id: &"event-#{&1.seq}")
       |> stream(:events, [])
 
@@ -45,17 +47,8 @@ defmodule MeridianWeb.Admin.RunLive.Show do
   defp add_event(%Event{} = event, socket) do
     socket
     |> assign(last_seq: event.seq)
-    |> update_text(event)
     |> stream_insert(:events, event)
   end
-
-  defp update_text(socket, %Event{type: "message.delta", payload: payload}) do
-    socket
-    |> update(:text, &(&1 <> Map.get(payload, "content", "")))
-    |> update(:reasoning, &(&1 <> Map.get(payload, "reasoning", "")))
-  end
-
-  defp update_text(socket, _event), do: socket
 
   @impl true
   def render(assigns) do
@@ -64,10 +57,7 @@ defmodule MeridianWeb.Admin.RunLive.Show do
       <.header>
         Run <code>{@run.id}</code>
         <:subtitle>
-          <.link navigate={~p"/admin/threads/#{@run.thread}"}>
-            {@run.thread.title || "Untitled thread"}
-          </.link>
-          · <.link navigate={~p"/admin/users/#{@run.thread.user}"}>{@run.thread.user.name}</.link>
+          By <.link navigate={~p"/admin/users/#{@run.thread.user}"}>{@run.thread.user.name}</.link>
         </:subtitle>
       </.header>
 
@@ -75,8 +65,6 @@ defmodule MeridianWeb.Admin.RunLive.Show do
         <dl class="details">
           <dt>Status</dt>
           <dd><.run_status status={@run.status} /></dd>
-          <dt>Persona</dt>
-          <dd><code>meridian/{@run.persona_snapshot["slug"]}</code></dd>
           <dt>Upstream model</dt>
           <dd><code>{@run.model}</code></dd>
           <dt>Created</dt>
@@ -87,30 +75,21 @@ defmodule MeridianWeb.Admin.RunLive.Show do
           <dd>{format_time(@run.finished_at)}</dd>
           <dt>Usage</dt>
           <dd>{format_usage(@run.usage)}</dd>
+          <%!-- The code only: an upstream's error message can quote the request. --%>
           <dt :if={@run.error}>Error</dt>
-          <dd :if={@run.error} class="error-text">
-            <code>{@run.error["code"]}</code> {@run.error["message"]}
-          </dd>
+          <dd :if={@run.error} class="error-text"><code>{@run.error["code"]}</code></dd>
         </dl>
       </section>
 
-      <.header level={2}>User message</.header>
-      <pre class="text card">{Message.text(@run.user_message)}</pre>
-
-      <.header level={2}>Reply</.header>
-      <details :if={@reasoning != ""} open={@run.status == :running}>
-        <summary class="muted">Reasoning</summary>
-        <pre id="run-reasoning" class="text card">{@reasoning}</pre>
-      </details>
-      <pre id="run-text" class="text card">{@text}<span :if={@run.status == :running} class="cursor">▍</span></pre>
-
-      <.header level={2}>Events</.header>
+      <.header level={2}>
+        Events
+        <:subtitle>What happened, by type. Their contents aren't shown.</:subtitle>
+      </.header>
       <table>
         <thead>
           <tr>
             <th>Seq</th>
             <th>Type</th>
-            <th>Payload</th>
             <th>Time</th>
           </tr>
         </thead>
@@ -118,7 +97,6 @@ defmodule MeridianWeb.Admin.RunLive.Show do
           <tr :for={{dom_id, event} <- @streams.events} id={dom_id}>
             <td>{event.seq}</td>
             <td><code>{event.type}</code></td>
-            <td><code class="payload">{format_payload(event.payload)}</code></td>
             <td class="muted">{Calendar.strftime(event.inserted_at, "%H:%M:%S.%f")}</td>
           </tr>
         </tbody>
@@ -126,7 +104,4 @@ defmodule MeridianWeb.Admin.RunLive.Show do
     </Layouts.app>
     """
   end
-
-  defp format_payload(payload) when payload == %{}, do: ""
-  defp format_payload(payload), do: Jason.encode!(payload)
 end

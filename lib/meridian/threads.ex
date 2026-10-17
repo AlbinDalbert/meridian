@@ -20,6 +20,47 @@ defmodule Meridian.Threads do
 
   ## Threads
 
+  @doc """
+  How much `user` uses Meridian, without anything they said: their number of threads,
+  messages, and runs, the tokens their runs used (`tokens_in` / `tokens_out`, from the
+  upstream's usage reports), and when they were last active. For the admin console, which
+  never shows conversations.
+  """
+  def activity(%User{id: user_id}) do
+    threads = from t in Thread, where: t.user_id == ^user_id
+
+    %{thread_count: thread_count, last_active_at: last_active_at} =
+      Repo.one(
+        from t in threads,
+          select: %{thread_count: count(t.id), last_active_at: max(t.updated_at)}
+      )
+
+    message_count =
+      Repo.aggregate(from(m in Message, join: t in ^threads, on: m.thread_id == t.id), :count)
+
+    runs =
+      Repo.one(
+        from r in Run,
+          join: t in ^threads,
+          on: r.thread_id == t.id,
+          select: %{
+            run_count: count(r.id),
+            tokens_in: type(sum(fragment("(?->>'prompt_tokens')::bigint", r.usage)), :integer),
+            tokens_out:
+              type(sum(fragment("(?->>'completion_tokens')::bigint", r.usage)), :integer)
+          }
+      )
+
+    %{
+      thread_count: thread_count,
+      message_count: message_count,
+      run_count: runs.run_count,
+      tokens_in: runs.tokens_in || 0,
+      tokens_out: runs.tokens_out || 0,
+      last_active_at: last_active_at
+    }
+  end
+
   @doc "A user's threads, most recently active first."
   def list_threads(%User{id: user_id}, opts \\ []) do
     Repo.all(

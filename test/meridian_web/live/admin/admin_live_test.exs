@@ -117,6 +117,32 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
     assert Personas.get_persona!(persona.id).system_prompt == "Be terse."
   end
 
+  test "default params and model validation are folded into an advanced section", %{conn: conn} do
+    user = user_fixture()
+    stub_upstream_models(["upstream-model"])
+    persona = Personas.get_default_persona(user)
+    {:ok, lv, _html} = live(conn, ~p"/admin/personas/#{persona}/edit")
+
+    assert has_element?(lv, "#persona-advanced:not([open]) #persona_params")
+    assert has_element?(lv, "#persona-advanced #force")
+
+    lv |> element("#persona-advanced summary") |> render_click()
+    assert has_element?(lv, "#persona-advanced[open]")
+    lv |> element("#persona-advanced summary") |> render_click()
+    refute has_element?(lv, "#persona-advanced[open]")
+
+    # An invalid param opens it, so the error can be seen.
+    assert lv |> form("#persona-form", persona: %{params: "nope"}) |> render_change() =~
+             "is invalid"
+
+    assert has_element?(lv, "#persona-advanced[open]")
+
+    # Once params are set, the summary says so.
+    {:ok, _} = Personas.update_persona(persona, %{"params" => %{"temperature" => 0.2}})
+    {:ok, lv, _html} = live(conn, ~p"/admin/personas/#{persona}/edit")
+    assert lv |> element("#persona-advanced summary") |> render() =~ "1 default param<"
+  end
+
   test "enabling and configuring extensions on a persona", %{conn: conn} do
     user = user_fixture()
     stub_upstream_models(["upstream-model"])

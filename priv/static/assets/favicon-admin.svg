@@ -1,0 +1,13 @@
+<!-- Meridian's mark as the admin console's tab icon, in the console's green, following the
+     system's light or dark like the console itself (see admin.css). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="2 -0.2 14 14">
+  <style>
+    .ring { fill: #2f5d50; } .night { fill: #c9d3cf; } .day { fill: #5e9c87; }
+    @media (prefers-color-scheme: dark) {
+      .ring { fill: #6fae99; } .night { fill: #33332f; } .day { fill: #a6d6c5; }
+    }
+  </style>
+  <path class="ring" d="M2.62 2.92 A7.4 7.4 0 0 1 15.39 8.44 L13.59 8.33 A5.6 5.6 0 0 0 3.93 4.15 Z"/>
+  <circle class="night" cx="8" cy="8" r="4.6"/>
+  <path class="day" transform="rotate(113.4 8 8)" d="M8 3.4 A4.6 4.6 0 0 1 8 12.6 A1.38 4.6 0 0 1 8 3.4 Z"/>
+</svg>

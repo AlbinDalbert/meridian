@@ -22,6 +22,7 @@ defmodule MeridianWeb.PersonaFormComponent do
       else
         socket
         |> assign(form: to_form(Personas.change_persona(socket.assigns.persona)), force: false)
+        |> assign(advanced_open: false)
         |> assign_extensions()
         |> assign_upstream_models()
       end
@@ -91,28 +92,11 @@ defmodule MeridianWeb.PersonaFormComponent do
         />
         <.model_datalist id="upstream-models" models={@upstream_models} />
         <.input
-          type="checkbox"
-          name="force"
-          id="force"
-          value={@force}
-          label="Skip upstream model validation"
-          hint="For upstreams that don't list every model, or that are temporarily down."
-        />
-        <.input
           field={@form[:system_prompt]}
           type="textarea"
           label="System prompt"
           rows="10"
           hint="Goes before the client's own system prompt."
-        />
-        <.input
-          field={@form[:params]}
-          type="textarea"
-          label="Default params"
-          rows="4"
-          value={params_text(@form[:params].value)}
-          spellcheck="false"
-          hint={~s(A JSON object of request params clients can override, e.g. {"temperature": 0.7}.)}
         />
         <fieldset class="field" id="persona-extensions">
           <legend>Extensions</legend>
@@ -123,7 +107,7 @@ defmodule MeridianWeb.PersonaFormComponent do
               name={"extensions[#{ext.name}][enabled]"}
               checked={ext.enabled}
               label={ext.name}
-              hint={ext.description}
+              description={ext.description}
             />
             <.input
               :if={ext.enabled}
@@ -141,6 +125,30 @@ defmodule MeridianWeb.PersonaFormComponent do
           </p>
           <.error :for={{message, _opts} <- @form[:extensions].errors}>{message}</.error>
         </fieldset>
+        <%!-- Whether it's open lives on the server (toggle_advanced), so the re-render after every
+             change doesn't close it, and it opens by itself to show an error inside. --%>
+        <details id="persona-advanced" class="advanced" open={@advanced_open}>
+          <summary phx-click="toggle_advanced" phx-target={@myself}>
+            Advanced<span :if={note = advanced_note(@form, @force)} class="inline-hint">{note}</span>
+          </summary>
+          <.input
+            field={@form[:params]}
+            type="textarea"
+            label="Default params"
+            rows="4"
+            value={params_text(@form[:params].value)}
+            spellcheck="false"
+            hint={~s(A JSON object of request params clients can override, e.g. {"temperature": 0.7}.)}
+          />
+          <.input
+            type="checkbox"
+            name="force"
+            id="force"
+            value={@force}
+            label="Skip upstream model validation"
+            hint="For upstreams that don't list every model, or that are temporarily down."
+          />
+        </details>
         <div class="form-actions">
           <.button phx-disable-with="Saving...">Save</.button>
           <.link navigate={@return_to}>Cancel</.link>
@@ -150,19 +158,40 @@ defmodule MeridianWeb.PersonaFormComponent do
     """
   end
 
+  # Says what's set inside, so it isn't hidden away unnoticed.
+  defp advanced_note(form, force) do
+    params =
+      case form[:params].value do
+        %{} = params when map_size(params) == 1 -> "1 default param"
+        %{} = params when map_size(params) > 1 -> "#{map_size(params)} default params"
+        _ -> nil
+      end
+
+    case Enum.filter([params, force && "skipping model validation"], & &1) do
+      [] -> nil
+      notes -> Enum.join(notes, ", ")
+    end
+  end
+
   defp params_text(params) when is_map(params) and map_size(params) == 0, do: ""
   defp params_text(params) when is_map(params), do: Jason.encode!(params, pretty: true)
   defp params_text(text) when is_binary(text), do: text
   defp params_text(_), do: ""
 
   @impl true
+  def handle_event("toggle_advanced", _params, socket) do
+    {:noreply, update(socket, :advanced_open, &(!&1))}
+  end
+
   def handle_event("validate", %{"persona" => params} = all, socket) do
     socket = update_extensions(socket, all["extensions"] || %{})
     params = params |> decode_params() |> put_extensions(socket)
     changeset = Personas.change_persona(socket.assigns.persona, params)
 
     {:noreply,
-     assign(socket, form: to_form(changeset, action: :validate), force: all["force"] == "true")}
+     socket
+     |> assign(form: to_form(changeset, action: :validate), force: all["force"] == "true")
+     |> open_advanced_on_error(changeset)}
   end
 
   def handle_event("save", %{"persona" => params} = all, socket) do
@@ -184,8 +213,18 @@ defmodule MeridianWeb.PersonaFormComponent do
          |> push_navigate(to: socket.assigns.return_to)}
 
       {:error, changeset} ->
-        {:noreply, assign(socket, form: to_form(changeset), force: force)}
+        {:noreply,
+         socket
+         |> assign(form: to_form(changeset), force: force)
+         |> open_advanced_on_error(changeset)}
     end
+  end
+
+  # Errors in the advanced section can only be seen with it open.
+  defp open_advanced_on_error(socket, changeset) do
+    if Keyword.has_key?(changeset.errors, :params),
+      do: assign(socket, advanced_open: true),
+      else: socket
   end
 
   # Keeps the extension rows in sync with what was submitted. An extension that was just

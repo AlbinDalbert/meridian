@@ -81,6 +81,7 @@ defmodule MeridianWeb.CoreComponents do
   attr :field, Phoenix.HTML.FormField
   attr :errors, :list, default: []
   attr :hint, :string, default: nil
+  attr :description, :string, default: nil, doc: "checkboxes only: shown right after the label"
   attr :options, :list, default: []
   attr :prompt, :string, default: nil
   attr :checked, :boolean
@@ -111,7 +112,7 @@ defmodule MeridianWeb.CoreComponents do
       <label>
         <input type="hidden" name={@name} value="false" />
         <input type="checkbox" id={@id} name={@name} value="true" checked={@checked} {@rest} />
-        {@label}
+        {@label}<span :if={@description not in [nil, ""]} class="inline-hint">{@description}</span>
       </label>
       <p :if={@hint} class="hint">{@hint}</p>
       <.error :for={msg <- @errors}>{msg}</.error>

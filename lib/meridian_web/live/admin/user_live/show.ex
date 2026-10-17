@@ -21,7 +21,7 @@ defmodule MeridianWeb.Admin.UserLive.Show do
     assign(socket,
       personas: Personas.list_personas(user),
       api_keys: Accounts.list_api_keys(user),
-      threads: Threads.list_threads(user)
+      activity: Threads.activity(user)
     )
   end
 
@@ -137,18 +137,23 @@ defmodule MeridianWeb.Admin.UserLive.Show do
       </.table>
 
       <.header level={2}>
-        Threads
-        <:subtitle>Conversations on the native API, most recently active first.</:subtitle>
+        Activity
+        <:subtitle>How much they use Meridian. What they say stays theirs.</:subtitle>
       </.header>
-      <.table id="threads" rows={@threads} empty="No threads yet.">
-        <:col :let={thread} label="Title">
-          <.link navigate={~p"/admin/threads/#{thread}"}>{thread.title || "Untitled"}</.link>
-        </:col>
-        <:col :let={thread} label="Persona">
-          <code :if={thread.persona}>{Persona.model_id(thread.persona)}</code>
-        </:col>
-        <:col :let={thread} label="Last active">{format_time(thread.updated_at)}</:col>
-      </.table>
+      <section class="card">
+        <dl class="details" id="activity">
+          <dt>Threads</dt>
+          <dd>{@activity.thread_count}</dd>
+          <dt>Messages</dt>
+          <dd>{@activity.message_count}</dd>
+          <dt>Runs</dt>
+          <dd>{@activity.run_count}</dd>
+          <dt>Tokens</dt>
+          <dd>{@activity.tokens_in} in / {@activity.tokens_out} out</dd>
+          <dt>Last active</dt>
+          <dd>{format_time(@activity.last_active_at)}</dd>
+        </dl>
+      </section>
     </Layouts.app>
     """
   end
