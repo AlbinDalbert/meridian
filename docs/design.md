@@ -329,7 +329,7 @@ Core event types:
 - `run.started`, `run.completed`, `run.failed`, `run.cancelled`
 - `step.started`, `step.restarted`
 - `message.delta` (text / reasoning content), `message.completed`
-- `tool_call.started`, `tool_call.completed`
+- `tool_call.started`, `tool_call.completed` (see [Tools](#tools))
 - `ext.<extension>.<name>`: namespaced events emitted by extensions (e.g.
   `ext.memory.recalled`)
 
@@ -396,11 +396,82 @@ now, and what each capability will look like for scripts:
 | Call the model, read and title threads | The `meridian` table (`meridian.model.complete`, `meridian.threads.*`) | Yes |
 | Background work           | `jobs` functions, queued with `meridian.jobs.enqueue` (unique keys, delays) | Yes |
 | Configuration             | Settings with defaults, declared by the script, set per persona, checked by the script's `validate` | Yes |
-| Provide model-callable tools | Register tools: name, description, JSON Schema params, a function | With the tool loop |
+| Provide model-callable tools | `tools` in the script: name → description, JSON Schema `parameters`, a `run` function (see [Tools](#tools)) | Slice 5 |
 | Emit events to clients    | `ext.<name>.<type>` in the run event stream | Later |
 | Own data                  | Key-value storage through the `meridian` table (scripts can't run migrations) | Later |
 | Expose an API             | Routes under `/api/ext/<name>/`, dispatched to the script | Later |
 | Talk to other extensions  | Extension-scoped PubSub topics | Later |
+
+### Tools
+
+A tool is a function the model can ask for. The model never runs anything: the request lists
+the tools (name, description, JSON Schema for the arguments), the model answers with
+`tool_calls` (a name and arguments as a JSON string) and `finish_reason: "tool_calls"`, Meridian
+runs the functions and adds their results to the conversation as `role: "tool"` messages, and
+calls the model again. That repeats until the model answers without asking for a tool. Whether
+a model can call tools at all depends on the upstream (its chat template and tool parser), not
+on Meridian.
+
+**Tools are part of extensions.** Hooks are functions the core calls at fixed points; tools are
+functions the model asks for, which the core then calls. Both are "a Lua function in an
+extension that Meridian calls with a context", with the same sandbox, settings, `meridian`
+table, and errors. A script declares them under `tools`, next to its hooks and jobs, and they
+can share code:
+
+```lua
+M.tools = {
+  get_weather = {
+    description = "Current weather for a city",
+    parameters = { type = "object", properties = { city = { type = "string" } },
+                   required = { "city" } },
+    run = function(args, ctx)
+      return lookup(args.city, ctx.settings.units)   -- text, or a table (sent as JSON)
+    end,
+  },
+}
+```
+
+- **Declaring.** Tool names are letters, digits, `_` and `-`. `description` is required.
+  `parameters` is a JSON Schema object, as a table or as a JSON string (Lua can't tell an empty
+  object from an empty list: an empty table becomes an object, so leave out empty lists or use
+  a string); without it the tool takes no arguments. They are checked when the script is saved.
+- **Enablement.** Enabling an extension on a persona enables all its tools. There are no
+  per-tool (or per-hook) switches in the core: an extension that wants a part to be optional
+  makes it a setting, and `before_run` gets the run's tool set, so a script can drop its own
+  tools; access that should differ is a different extension.
+- **The run's tool set.** At the start of a run, the tools of the persona's enabled extensions
+  are collected under the name `<extension>__<tool>` (shortened to 64 characters if needed, unique per run), offered to `before_run`
+  (which may remove tools or change their descriptions), and frozen for the run: every model
+  call of the run offers the same tools.
+- **The loop.** One model call plus the tool calls it asks for is a step. The `RunServer`
+  collects the streamed tool call fragments, saves the assistant message (with its
+  `tool_calls`, after `message_end`), and runs each call: the `tool_call` hook (may rewrite the
+  arguments or block the call), then the tool's `run` in its own supervised task, so the
+  `RunServer` keeps handling cancels and heartbeats; calls of one step run concurrently. Each
+  result goes through `tool_result` and is saved as a `tool` message. Once every call has a
+  result, `step_end` fires and the next step starts, with `context` and `before_model_request`
+  called again on the conversation so far.
+- **Failures are results.** An unknown tool, arguments that aren't a JSON object, a blocked
+  call, a tool that raises, returns `nil, "message"`, or takes too long: the model gets
+  `Error: ...` as the result and decides what to do. Only the run's own problems (the upstream,
+  the step limit) fail the run. A crashing `tool_call` handler blocks the call (fail-closed).
+- **Limits.** A tool call gets 30 s (`:tool_timeout`) and the usual memory cap and instruction
+  budget; its result is cut at 20 000 characters (`:max_tool_result_chars`), saying so; a run
+  makes at most 10 model calls (`:max_steps`) and fails with `too_many_steps` past that.
+- **History.** Tool messages are kept in the thread like any other message, so later runs see
+  them. A tool call without a saved result (the run was cancelled or interrupted) is sent
+  upstream with `Error: the tool call was interrupted`, so the history is always valid.
+- **Approval.** Everything is approved automatically for now; `awaiting_approval` stays
+  unused.
+- **Events.** `tool_call.started` (`id`, `name`, `arguments`) and `tool_call.completed`
+  (`id`, `name`, `status` `ok`/`error`, and the saved `tool` message). Intermediate assistant
+  messages get `message.completed` like the final one, so a run can complete several messages.
+  The admin console shows the event types and times only, as for every event.
+
+Not in the first version: HTTP for scripts (`meridian.http`, which needs its own SSRF rules),
+so tools are pure Lua plus the `meridian` table; resuming a run after a crash (`run_steps`; a
+crash still fails the run); approval; client-side tools on `/api`; tools on `/v1` (it stays a
+proxy); MCP servers as a tool source ("soon").
 
 ### Hook points
 
@@ -420,14 +491,14 @@ persona.
 | Hook               | Receives / may change | Can halt? | Available |
 |--------------------|-----------------------|-----------|-----------|
 | `run_start`        | Run, thread, persona. Observe; set up per-run state | No | v0 |
-| `before_run`       | System prompt sections, tool set, model params for this run | Yes (reject run) | v0 |
-| `context`          | The conversation history about to be sent, without the system prompt (inject, trim, summarize, rewrite) | No | v0 |
-| `before_model_request` | The final upstream request body (model routing, params) | No | v0 |
+| `before_run`       | System prompt sections, model params, and the tool set for this run | Yes (reject run) | v0 (tool set: slice 5) |
+| `context`          | The conversation history about to be sent, without the system prompt (inject, trim, summarize, rewrite). Called before every model call of the run | No | v0 |
+| `before_model_request` | The final upstream request body (model routing, params). Called before every model call | No | v0 |
 | `model_stream_event` | Raw stream events. Read-only, must be fast | No | v0 |
-| `tool_call`        | Tool name + arguments (rewrite) | Yes (block → error result to the model) | With the tool loop |
-| `tool_result`      | Tool result (redact, transform). Chained | No | With the tool loop |
-| `message_end`      | Finalized assistant message (replace content) | No | v0 |
-| `step_end`         | Step boundary. May request one more model call (`continue`) | No | With the tool loop |
+| `tool_call`        | Tool name + arguments (rewrite) | Yes (block → error result to the model) | Slice 5 |
+| `tool_result`      | Tool result (redact, transform). Chained | No | Slice 5 |
+| `message_end`      | Finalized assistant message (replace content), every one the run saves | No | v0 |
+| `step_end`         | Step boundary. Observe (*later:* may request one more model call, `continue`) | No | Slice 5 |
 | `run_end`          | Final outcome. Observe; enqueue follow-up jobs (must return quickly) | No | v0 |
 | `thread_created` / `thread_deleted` | Thread lifecycle | No | v0 |
 
@@ -465,8 +536,8 @@ mechanisms over time without changing the contract:
 
 1. **Lua scripts in the database (now).** An extension is a row: a name, a Lua 5.3 script,
    and an owner (none for global extensions). The script returns a table that *is* the
-   extension: `description`, `settings` (defaults), `validate`, a function per hook, and `jobs`
-   (see `Meridian.Extensions.Script`). It runs on the `lua` package, a Lua VM written in Elixir,
+   extension: `description`, `settings` (defaults), `validate`, a function per hook, `jobs`,
+   and `tools` (see `Meridian.Extensions.Script`). It runs on the `lua` package, a Lua VM written in Elixir,
    so there's no native code, and it's sandboxed (no files, OS, or `require`). Scripts are
    edited in the browser (`/admin/extensions`, `/me/extensions`), checked by loading them when
    saved, and used from the next hook call on; no git, no deploy. They can be exported as
@@ -606,7 +677,7 @@ api_keys        id, user_id, name, prefix, token_hash, policy jsonb, last_used_a
 personas        id, user_id, slug, name, system_prompt, model, params jsonb,
                 extensions jsonb, is_default
 threads         id, user_id, persona_id, title, settings jsonb, archived_at, inserted_at, updated_at
-messages        id, thread_id, run_id?, parent_id?, role, content jsonb (parts),
+messages        id, thread_id, run_id?, parent_id?, role (user, assistant, tool), content jsonb (parts),
                 tool_calls jsonb?, tool_call_id?, metadata jsonb, usage jsonb?, inserted_at
 runs            id, thread_id, user_message_id, parent_run_id?, status, persona_snapshot jsonb,
                 model, step_count, usage jsonb, error jsonb?, heartbeat_at,
@@ -729,10 +800,20 @@ without a deploy, by the operator or by a user for themselves.*
 **Slice 4: memory extension.** Design TBD (including whether personas share memories). Adds
 extension-owned tables; the real stress test of the extension API.
 
+**Slice 5: tools v0.** *Done when: a tool written in an extension's script is offered to the
+model, called, and its result used, over as many steps as the model needs, in a durable run.*
+
+1. `tools` in scripts, checked on save and shown on the extension pages.
+2. The run's tool set (`before_run`), the tool loop in the `RunServer`, and the `tool_call`,
+   `tool_result`, and `step_end` hooks.
+3. Tool calls and tool messages saved in the thread and sent back upstream.
+
 **Next**
-- Tools from extensions + MCP-backed tools
+- `meridian.http` for scripts (with SSRF rules), so tools can call APIs
+- Resuming runs after a crash (`run_steps`)
+- Tool approval (`awaiting_approval`), client-side tools on `/api`
+- MCP-backed tools
 - Skills extension
-- Tool approval (`awaiting_approval`)
 
 **Later**
 
@@ -822,6 +903,13 @@ Add an entry whenever a decision is made or reversed.
 | **`model_stream_event` isn't available to scripts** | Calling scripts for every chunk | It fires for every streamed chunk; an interpreted script per chunk would slow every reply. |
 | **An extension's latest error is kept in memory on each node and shown on its page, live**; saving clears it | Error columns on the row; only the server log | Script authors need to see why their hook was skipped without server access. It's diagnostic, not data, so losing it on restart is fine, and it keeps the table to name, source, and owner. |
 | **Import only fills the editor; export downloads `<name>.lua`. No versions yet** | Importing straight into a saved extension; version history now | Import is copy-paste with a file picker: the script is checked when saved, like typed code. Versions are wanted but not needed to experiment. |
+| **Tools are part of extensions: `tools` in the script, next to hooks and jobs** | A separate kind of row for tools; tools only from MCP servers | A tool and a hook are both Lua functions Meridian calls with a context; only who decides to call them differs (the model, or the lifecycle). Keeping them in one script lets a feature (memory: inject in `context`, save with a `remember` tool) be one extension sharing code and settings, with no second sandbox, editor, or enablement. |
+| **Enabling an extension enables all its tools; no per-tool or per-hook switches in the core** | Per-persona tool checkboxes (a new `personas.extensions` shape); per-hook toggles | The author knows which parts belong together; switching hooks off one by one can leave an extension half-working, and hook names mean nothing to users. Optional parts are settings (and `before_run` can drop a script's own tools); different access is a different extension. Keeps `personas.extensions` as it is. |
+| **Tool names sent upstream are `<extension>__<tool>`** | The tool's own name; names chosen by the persona | Two extensions can both have a `search`; the extension name makes them unique and tells the model where a tool comes from. Upstreams allow `[a-zA-Z0-9_-]` (which extension and tool names already are), up to 64 characters; longer names are shortened, keeping them unique. |
+| **Tool failures are results for the model, not run failures** | Failing the run on any tool error | Models handle `Error: ...` well (retry, other arguments, tell the user); one bad call shouldn't throw away the run. |
+| **Tool calls are approved automatically, for now** | Building approval (`awaiting_approval`) with the loop | The point of the first version is the execution path. Approval needs runs that pause and resume, which needs `run_steps`. |
+| **`context` and `before_model_request` run before every model call; `before_run` once per run** | Calling every hook once per run | Extensions that trim or inject history must see the tool messages of earlier steps, and every request goes through the same path. The system prompt, params, and tool set are the run's and don't change between steps. |
+| **A tool call without a result is sent upstream as interrupted** | Saving placeholder results when a run ends; leaving the history as it is | Upstreams reject an assistant `tool_calls` message without a result for every call. Fixing it when the history is built covers every way a run can end (cancel, failure, a dead node) in one place. |
 
 ## Open questions
 
