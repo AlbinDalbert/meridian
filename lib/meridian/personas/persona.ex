@@ -38,6 +38,7 @@ defmodule Meridian.Personas.Persona do
     |> update_change(:name, &String.trim/1)
     |> update_change(:model, &String.trim/1)
     |> validate_required([:slug, :name, :model])
+    |> validate_not_blank([:slug, :name, :model])
     |> validate_length(:slug, max: 64)
     |> validate_format(:slug, ~r/^[a-z0-9][a-z0-9_.-]*$/,
       message: "must be lowercase letters, digits, '-', '_' or '.'"
@@ -51,6 +52,16 @@ defmodule Meridian.Personas.Persona do
       Enum.map(Meridian.Extensions.settings_errors(extensions), &{:extensions, &1})
     end)
     |> unique_constraint(:slug, name: :personas_user_id_slug_index)
+  end
+
+  # `cast` keeps "" (so a system prompt can be cleared), which `validate_required` then
+  # doesn't count as missing.
+  defp validate_not_blank(changeset, fields) do
+    Enum.reduce(fields, changeset, fn field, changeset ->
+      validate_change(changeset, field, fn ^field, value ->
+        if value == "", do: [{field, {"can't be blank", [validation: :required]}}], else: []
+      end)
+    end)
   end
 
   @doc "The model id clients use to select this persona."

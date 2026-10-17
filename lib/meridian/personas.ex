@@ -30,6 +30,16 @@ defmodule Meridian.Personas do
     Repo.get_by(Persona, user_id: user_id, slug: slug)
   end
 
+  @doc """
+  The upstream model of the newest user's default persona, or `nil` if there are no users. A
+  sensible suggestion for the next user's.
+  """
+  def newest_default_model do
+    Repo.one(
+      from p in Persona, where: p.is_default, order_by: [desc: p.id], limit: 1, select: p.model
+    )
+  end
+
   def get_default_persona(%User{id: user_id}) do
     Repo.get_by(Persona, user_id: user_id, is_default: true)
   end

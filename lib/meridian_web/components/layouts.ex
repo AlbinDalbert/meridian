@@ -1,7 +1,7 @@
 defmodule MeridianWeb.Layouts do
   @moduledoc """
-  Layouts for the admin console (`root/1`, `app/1`) and the user area under `/me` (`me_root/1`,
-  `me/1`).
+  Layouts for the admin console (`root/1`, `app/1`), the user area under `/me` (`me_root/1`,
+  `me/1`), and the public request page (`public_root/1`).
   """
   use MeridianWeb, :html
 
@@ -25,6 +25,28 @@ defmodule MeridianWeb.Layouts do
       live_socket_path: "/me/live"
     })
     |> document()
+  end
+
+  @doc """
+  The HTML document shell for public pages (the request page): no LiveView, and its own
+  stylesheet, in the look of xebec's login.
+  """
+  def public_root(assigns) do
+    ~H"""
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="robots" content="noindex" />
+        <.live_title suffix=" · Meridian">{assigns[:page_title] || "Meridian"}</.live_title>
+        <link rel="stylesheet" href={~p"/assets/public.css"} />
+      </head>
+      <body>
+        {@inner_content}
+      </body>
+    </html>
+    """
   end
 
   # Each area connects to its own LiveView socket (see priv/static/assets/live.js). The root
@@ -65,6 +87,7 @@ defmodule MeridianWeb.Layouts do
     <nav class="topbar">
       <a href={~p"/admin/users"} class="brand">Meridian</a>
       <.link :if={@signed_in} navigate={~p"/admin/users"}>Users</.link>
+      <.link :if={@signed_in} navigate={~p"/admin/requests"}>Requests</.link>
       <.link :if={@signed_in} navigate={~p"/admin/runs"}>Runs</.link>
       <.form :if={@signed_in} for={%{}} action={~p"/admin/logout"} method="post" class="logout">
         <button type="submit" class="link">Log out</button>

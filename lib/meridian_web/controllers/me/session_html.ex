@@ -13,6 +13,7 @@ defmodule MeridianWeb.Me.SessionHTML do
         <section class="card">
           <a href={~p"/me/auth/oidc"} class="btn btn-primary login-oidc">Sign in</a>
         </section>
+        <p class="muted">No access yet? <a href={~p"/me/request"}>Request it</a>.</p>
       </div>
     </Layouts.me>
     """

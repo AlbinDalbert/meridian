@@ -105,6 +105,7 @@ defmodule MeridianWeb.Router do
 
     live_session :admin, on_mount: {MeridianWeb.AdminAuth, :require_admin} do
       live "/users", UserLive.Index, :index
+      live "/requests", AccessRequestLive.Index, :index
       live "/users/new", UserLive.Form, :new
       live "/users/:id", UserLive.Show, :show
       live "/users/:id/edit", UserLive.Form, :edit
@@ -125,6 +126,8 @@ defmodule MeridianWeb.Router do
     post "/logout", SessionController, :delete
     get "/auth/oidc", SessionController, :oidc
     get "/auth/callback", SessionController, :callback
+    get "/request", AccessRequestController, :new
+    post "/request", AccessRequestController, :create
   end
 
   scope "/me", MeridianWeb.Me do

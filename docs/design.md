@@ -223,6 +223,29 @@ still no signup.
 - Browser apps find it as `account_url` in `GET /api/auth/session`.
 - *Later:* self-service API keys, browsing your own threads.
 
+### Access requests (`/me/request`)
+
+A public page where anyone can leave their email (and optionally a name) to ask to be added,
+so the operator can send friends a link instead of collecting emails by hand. It is styled
+like xebec's login (its own `public.css`) and is on whenever `/me` is.
+
+- A valid email always gets the same "request sent" answer, whether it already has a user, a
+  request, or neither, so the page doesn't reveal who has access. Emails that have a user are
+  never saved.
+- **One request per email** (case-insensitive, a unique index). Asking again moves the existing
+  request to the top of its list (`requested_at`), counts it ("Asked 3 times"), and takes the
+  new name if one was given; it keeps its status. Lists are newest-asked first.
+- The admin console lists requests as cards (`/admin/requests`), email first, then the name.
+  **Accept** creates the user (name: theirs, or the start of their email) with a default
+  persona on the model set at the top of the page (suggested: the newest user's), and deletes
+  the request; they then sign in as usual. **Snooze** moves it to "Later", with no timer.
+  **Reject** keeps it (so the same email can't keep asking) under "Rejected", where it can be
+  restored.
+- At most 200 open (pending or snoozed) requests; past that the page says it isn't taking
+  requests. That bounds what a script filling in the form can do. There is no other rate
+  limiting yet.
+- This is still not signup: nobody gets in until the operator accepts.
+
 ## Runs: the durable execution model
 
 A **run** is one agent turn: from a user message to a final assistant message, including any
@@ -447,7 +470,8 @@ permissions and see everything. Remote extensions see only what their hook subsc
 
 - **Users** are generic: id, display name, email (required, unique case-insensitively, since
   it is how a first sign-in finds its user). There is no signup. Users are
-  created by the operator in the [admin UI](#admin-ui).
+  created by the operator in the [admin UI](#admin-ui), by hand or by accepting an
+  [access request](#access-requests-merequest).
 - **API keys** identify a user to clients, one per client/purpose. Minted in the admin UI (and
   later self-service via `/api/keys`). Format `mrd_<random>`, shown once, stored as a SHA-256
   hash with a short visible prefix.
@@ -722,6 +746,11 @@ Add an entry whenever a decision is made or reversed.
 | **Users manage their own personas in `/me`, a LiveView area separate from `/admin`** | User roles inside `/admin`; only a JSON API for clients (e.g. xebec) to build on | Keeps operating and using Meridian as different roles with different sessions: a bug in `/me` can't open `/admin`. Lives in the release (no client needed, no asset build) and reuses the admin persona form and the sign-in Meridian already runs. A JSON API for personas can come later on the same user-scoped domain functions. |
 | **`/me` signs in with the OIDC provider only, into its own `SameSite=Lax` cookie** | Reusing the `/api` sign-in cookie; `SameSite=Strict` with a meta-refresh callback like `/admin` | The `/api` cookie is scoped to `/api` and checked differently (`X-Requested-With`); LiveView needs a real session. Lax keeps people signed in when they follow a link to `/me` from an app; forms and the LiveView socket carry CSRF tokens, and the callback can simply redirect. |
 | **Users may pick any upstream model in `/me`** | An operator-defined allowlist of models | Nobody needs a limit yet; it can be added when someone does. |
+| **A public access request page; the operator accepts, snoozes, or rejects in the admin console** (keeps "no signup") | Signup; the operator collecting emails by hand; invite links | Lets friends ask without the operator typing their details, while users are still only ever created by the operator. Accepting reuses user creation, so the request holds nothing but an email and a name. |
+| **Request answers don't depend on the email; rejected requests are kept; open requests are capped at 200** | Telling people they already have access; deleting rejected requests; rate limiting by IP | The page is public, so it mustn't reveal who uses Meridian. Keeping rejections stops the same email from asking again. A cap is a dependency-free bound on abuse; IP rate limiting can come if it's needed. |
+| **Asking again bumps the existing request; it keeps its status** | Ignoring repeats; a row per request; un-snoozing or un-rejecting on a repeat | No duplicates in the list, but the operator still sees that someone asked again, and when. An upsert on the email index makes it one statement, so simultaneous requests can't make two rows. Repeats don't undo the operator's snooze or reject. |
+| **Snooze just moves a request to "Later"** | Snoozing for a set time | It means "I'll look at this later"; a timer would decide "later" for the operator. |
+| **Accepting asks for the default persona's model once, at the top of the requests page** | A model field per card; going through the new-user form | Every user needs a default persona with a model; one page-level choice (prefilled with the newest user's model) keeps accepting to one click. |
 
 ## Open questions
 

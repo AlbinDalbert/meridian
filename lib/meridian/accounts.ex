@@ -202,7 +202,8 @@ defmodule Meridian.Accounts do
     end
   end
 
-  defp get_user_by_email(email) do
+  @doc "Gets the user with `email` (case-insensitive), or `nil`."
+  def get_user_by_email(email) do
     email = String.downcase(String.trim(email))
     Repo.one(from u in User, where: fragment("lower(?)", u.email) == ^email)
   end

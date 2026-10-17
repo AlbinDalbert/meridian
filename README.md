@@ -90,6 +90,12 @@ params, extensions) and pick their default. It has nothing to do with the admin 
 own session, no `ADMIN_EMAILS`, and only your own things. Users are linked by email as below.
 Redirect URI: `https://<PHX_HOST>/me/auth/callback`.
 
+**Access requests.** With `/me` on, `https://<PHX_HOST>/me/request` is a public page where
+anyone can leave their email (and a name) to ask to be added. Send it to friends; their
+requests show up under Requests in the admin console, where Accept creates their user (with a
+default persona on the model you pick there), Snooze puts it aside for later, and Reject turns
+it down. Once accepted, they sign in with that email.
+
 **Browser apps** (e.g. [xebec](../xebec)). On whenever the client is set. Meridian runs the
 login for the app, like it does for `/admin`: the app links its "Sign in" button to
 `/api/auth/login?return_to=/some/path`, Meridian sends the browser to the provider and back to

@@ -9,6 +9,16 @@ defmodule Meridian.PersonasTest do
     %{user: user_fixture()}
   end
 
+  test "slug, name, and model can't be blank, even when trimmed to nothing", %{user: user} do
+    assert {:error, changeset} =
+             Personas.create_persona(user, %{"slug" => " ", "name" => "", "model" => "  "},
+               force: true
+             )
+
+    errors = errors_on(changeset)
+    for field <- [:slug, :name, :model], do: assert("can't be blank" in errors[field])
+  end
+
   describe "create_persona/3 model validation" do
     test "accepts a model the upstream lists", %{user: user} do
       stub_upstream_models(["m1", "m2"])
