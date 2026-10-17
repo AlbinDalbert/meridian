@@ -10,6 +10,7 @@ defmodule Meridian.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      dialyzer: dialyzer(),
       listeners: [Phoenix.CodeReloader]
     ]
   end
@@ -52,7 +53,18 @@ defmodule Meridian.MixProject do
       {:req, "~> 0.7.5"},
       {:phoenix_html, "~> 4.3"},
       {:phoenix_live_view, "~> 1.2"},
-      {:lazy_html, "~> 0.1.13", only: :test}
+      {:lazy_html, "~> 0.1.13", only: :test},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
+    ]
+  end
+
+  # Dialyzer (`mix dialyzer`) runs in precommit and CI. All PLTs (the cached type info of OTP,
+  # Elixir, and the deps) live in `_build`, so CI caches them along with the build.
+  defp dialyzer do
+    [
+      plt_core_path: "_build/#{Mix.env()}",
+      # test/support uses ExUnit.
+      plt_add_apps: [:ex_unit]
     ]
   end
 
@@ -68,7 +80,13 @@ defmodule Meridian.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
+      precommit: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format",
+        "test",
+        "dialyzer"
+      ]
     ]
   end
 end

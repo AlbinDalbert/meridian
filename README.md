@@ -75,7 +75,7 @@ Other endpoints: `GET/PATCH/DELETE /api/threads/:id`, `GET /api/runs/:id`, and
 `POST /api/runs/:id/cancel`. The admin console shows threads and runs, including a live view
 of a run as it generates.
 
-Before committing, run `mix precommit` (warnings as errors, unused deps, format, tests).
+Before committing, run `mix precommit` (warnings as errors, unused deps, format, tests, Dialyzer).
 
 Health probes: `GET /healthz` (liveness) and `GET /readyz` (database reachable).
 
