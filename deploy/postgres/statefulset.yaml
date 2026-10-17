@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: meridian-postgres
+  labels:
+    app.kubernetes.io/name: meridian-postgres
+spec:
+  serviceName: meridian-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: meridian-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: meridian-postgres
+    spec:
+      containers:
+        - name: postgres
+          # Same image as compose.yaml and CI.
+          image: pgvector/pgvector:pg17
+          env:
+            - name: POSTGRES_USER
+              value: meridian
+            - name: POSTGRES_DB
+              value: meridian
+            # A subdirectory, since a fresh volume's root may not be empty (lost+found).
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          envFrom:
+            - secretRef:
+                name: meridian-postgres
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "meridian", "-d", "meridian"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi

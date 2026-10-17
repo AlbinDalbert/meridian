@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: meridian-postgres
+  labels:
+    app.kubernetes.io/name: meridian-postgres
+spec:
+  selector:
+    app.kubernetes.io/name: meridian-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

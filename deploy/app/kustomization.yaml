@@ -1,0 +1,14 @@
+# Meridian itself: a Deployment (migrations run in an init container) and a Service.
+# Expects a ConfigMap `meridian-config` and a Secret `meridian-secrets` from the overlay.
+# See ../README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml
+
+images:
+  - name: meridian
+    newName: ghcr.io/albindalbert/meridian
+    newTag: main

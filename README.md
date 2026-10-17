@@ -77,7 +77,8 @@ of a run as it generates.
 
 Before committing, run `mix precommit` (warnings as errors, unused deps, format, tests, Dialyzer).
 
-Health probes: `GET /healthz` (liveness) and `GET /readyz` (database reachable).
+Health probes: `GET /healthz` (liveness) and `GET /readyz` (database reachable). To deploy on
+Kubernetes, see [`deploy/README.md`](deploy/README.md).
 
 ## Running
 

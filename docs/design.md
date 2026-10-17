@@ -522,8 +522,10 @@ Extensions declare and read their own config.
   (`linux/amd64`, `linux/arm64`) with `docker buildx`.
 - Migrations (core + enabled extensions) run via a release command / init container.
 - Requires Postgres (with `pgvector` installed if extensions use it).
-- A generic Helm chart or kustomize base can live in `deploy/` later. Environment-specific values
-  belong in the operator's own infrastructure repo.
+- Kustomize bases in `deploy/` (`app/`, and an optional `postgres/`); see `deploy/README.md`.
+  Hosts, secrets, and the image tag belong in an overlay in the operator's own infrastructure
+  repo.
+- The image is public on GHCR, so clusters pull it without credentials.
 - Single node first; PubSub and `Registry` are designed so clustering (`libcluster`) is possible
   later without redesign.
 
@@ -647,6 +649,8 @@ Add an entry whenever a decision is made or reversed.
 | **Development reads `.env` itself** (in `config/runtime.exs`; shell variables win); releases and tests only use real environment variables | `source`/`set -a` by hand; direnv; a dotenv library | Running locally shouldn't need shell tricks. A dozen lines cover `KEY=value` files without a dependency, and deployments keep config in the platform's environment, not in files. |
 | **Timezones via the `tz` package** | UTC offsets only | Elixir only ships UTC. Named zones with daylight saving need a timezone database; `tz` is small and has no runtime dependencies. |
 | **Slice 3 is proven by two tiny extensions (`datetime`, `title`); memory gets its own slice; Channels are dropped for now** | Title generation alone; memory in slice 3; Channels in slice 3 | Titles alone only exercise `run_end`. Memory's design (e.g. shared across personas or not) is a memory question, not an API one. No client needs WebSockets yet. |
+| **Kubernetes manifests are kustomize bases** (`deploy/app`, `deploy/postgres`) that overlays reference by URL; configuration comes from generated ConfigMaps/Secrets | A Helm chart; manifests only in the operator's repo; building images on a cluster node | Plain YAML with no templating to learn, and overlays keep every deployment-specific value out of this public repo. Generated names roll the Deployment when config changes. CI already builds multi-arch images in about two minutes, so nodes only ever pull. |
+| **Health probes are exempt from `force_ssl`** | Probing over HTTPS; a separate probe port | kubelet calls the pod over plain HTTP and counts a redirect to another host as success, so `/readyz` would pass with the database down. |
 
 ## Open questions
 

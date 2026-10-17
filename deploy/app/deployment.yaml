@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: meridian
+  labels:
+    app.kubernetes.io/name: meridian
+spec:
+  # One node for now (see docs/design.md, "Deployment"). A rolling update starts the new pod
+  # before stopping the old one, so a deploy has no downtime.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: meridian
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: meridian
+    spec:
+      # On shutdown, runs still in progress are failed as `interrupted` and the client can retry;
+      # nothing waits for them to finish, so the default grace period is plenty.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        # The image's `nobody`. Needs the number: kubelet can't verify a user name isn't root.
+        runAsUser: 65534
+      initContainers:
+        - name: migrate
+          image: meridian
+          imagePullPolicy: Always
+          command: ["/app/bin/migrate"]
+          envFrom:
+            - configMapRef:
+                name: meridian-config
+            - secretRef:
+                name: meridian-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: meridian
+          image: meridian
+          # So `kubectl rollout restart` picks up a new `:main`. Cheap with pinned tags too.
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: meridian-config
+            - secretRef:
+                name: meridian-secrets
+          ports:
+            - name: http
+              containerPort: 4000
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
