@@ -58,6 +58,7 @@ defmodule MeridianWeb.Router do
   scope "/api", MeridianWeb.Api do
     pipe_through :api
 
+    get "/personas", PersonaController, :index
     resources "/threads", ThreadController, except: [:new, :edit]
     get "/threads/:thread_id/messages", MessageController, :index
     post "/threads/:thread_id/messages", MessageController, :create

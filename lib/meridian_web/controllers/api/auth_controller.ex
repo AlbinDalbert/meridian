@@ -6,7 +6,9 @@ defmodule MeridianWeb.Api.AuthController do
     * `GET /api/auth/session` says whether sign-in is available and who is signed in.
     * `GET /api/auth/login?return_to=/path` sends the browser to the provider. The provider
       sends it back to `GET /api/auth/callback`, which starts the session and redirects to
-      `return_to` (a path on the app's origin). On failure, it adds
+      `return_to` (a path on the app's origin). With `prompt=login`, the provider asks the
+      person to sign in again rather than reusing its own session (for switching accounts
+      after logging out). On failure, it adds
       `?sign_in_error=<code>`: `unknown_user`, `cancelled`, `unavailable`, or `failed`.
     * `POST /api/auth/logout` ends the session.
 
@@ -53,7 +55,8 @@ defmodule MeridianWeb.Api.AuthController do
              redirect_uri: flow.redirect_uri,
              state: flow.state,
              nonce: flow.nonce,
-             code_challenge: OIDC.code_challenge(flow.verifier)
+             code_challenge: OIDC.code_challenge(flow.verifier),
+             fresh: params["prompt"] == "login"
            ) do
       conn
       |> put_resp_cookie(@flow_cookie, flow, flow_cookie_options(conn))

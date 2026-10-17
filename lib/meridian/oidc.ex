@@ -68,12 +68,14 @@ defmodule Meridian.OIDC do
 
   @doc """
   The URL to send a browser to for logging in. `params` must include `:client_id`,
-  `:redirect_uri`, `:state`, `:nonce`, and `:code_challenge` (S256).
+  `:redirect_uri`, `:state`, `:nonce`, and `:code_challenge` (S256). With `fresh: true`, the
+  provider is asked to sign the person in again instead of reusing its own session
+  (`prompt=login` and `max_age=0`), so they can pick another account after logging out.
   """
   def authorize_url(params) do
     with {:ok, %{"authorization_endpoint" => endpoint}} <- discovery() do
       query =
-        URI.encode_query(%{
+        %{
           response_type: "code",
           scope: "openid email profile",
           client_id: Keyword.fetch!(params, :client_id),
@@ -82,7 +84,9 @@ defmodule Meridian.OIDC do
           nonce: Keyword.fetch!(params, :nonce),
           code_challenge: Keyword.fetch!(params, :code_challenge),
           code_challenge_method: "S256"
-        })
+        }
+        |> Map.merge(if(params[:fresh], do: %{prompt: "login", max_age: 0}, else: %{}))
+        |> URI.encode_query()
 
       {:ok, endpoint <> if(String.contains?(endpoint, "?"), do: "&", else: "?") <> query}
     end

@@ -117,6 +117,16 @@ defmodule MeridianWeb.Api.AuthControllerTest do
              conn |> get(~p"/api/threads") |> json_response(401)
   end
 
+  test "prompt=login asks the provider to sign in again", %{conn: conn} do
+    OIDCStub.stub()
+    {_conn, query} = start_sign_in(conn)
+    refute Map.has_key?(query, "prompt")
+
+    {_conn, query} = start_sign_in(build_conn(), %{"prompt" => "login"})
+    assert query["prompt"] == "login"
+    assert query["max_age"] == "0"
+  end
+
   test "changes need X-Requested-With; reads don't", %{conn: conn} do
     OIDCStub.stub()
     {conn, query} = start_sign_in(conn)

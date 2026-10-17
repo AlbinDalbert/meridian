@@ -91,7 +91,9 @@ login for the app, like it does for `/admin`: the app links its "Sign in" button
 token. The app must be served on the same origin as `/api` (a reverse proxy routing `/api` to
 Meridian, as xebec's image does), and requests that change something must send an
 `X-Requested-With` header. `GET /api/auth/session` says whether sign-in is available and who is
-signed in; `POST /api/auth/logout` ends the session. Users are linked by email as below.
+signed in; `POST /api/auth/logout` ends the session. Meridian's session only: the provider
+keeps its own, so after logging out send `prompt=login` with the next `/api/auth/login` to have
+the provider ask again (and let the person pick another account). Users are linked by email as below.
 Redirect URI: `https://<app host>/api/auth/callback`; behind a proxy, Meridian builds it
 from `X-Forwarded-Host` and `X-Forwarded-Proto`.
 
@@ -119,7 +121,8 @@ With WorkOS:
 3. For clients that run the login themselves, create a first-party application each (public,
    with the client's own redirect URI) and add its client id to `OIDC_AUDIENCES`.
 
-Other endpoints: `GET/PATCH/DELETE /api/threads/:id`, `GET /api/runs/:id`, and
+Other endpoints: `GET /api/personas` (the personas the caller may use, as `{id, name, model,
+default}`; `id` is what threads take as `persona`), `GET/PATCH/DELETE /api/threads/:id`, `GET /api/runs/:id`, and
 `POST /api/runs/:id/cancel`. The admin console shows threads and runs, including a live view
 of a run as it generates.
 

@@ -50,6 +50,22 @@ defmodule MeridianWeb.ApiTest do
     assert %{"error" => %{"code" => "missing_api_key"}} = json_response(conn, 401)
   end
 
+  describe "personas" do
+    test "list the ones the key allows, marking the default", %{conn: conn, user: user} do
+      assert %{"data" => [default, coder]} = conn |> get(~p"/api/personas") |> json_response(200)
+      assert %{"id" => "meridian/default", "model" => "qwen", "default" => true} = default
+      assert %{"id" => "meridian/coder", "default" => false} = coder
+
+      restricted =
+        api_key_fixture(user, %{
+          "policy" => %{"allowed_personas" => ["coder"], "default_persona" => "coder"}
+        })
+
+      assert %{"data" => [%{"id" => "meridian/coder", "default" => true}]} =
+               conn |> authed(restricted) |> get(~p"/api/personas") |> json_response(200)
+    end
+  end
+
   describe "threads" do
     test "create, list, show, update, delete", %{conn: conn} do
       thread = create_thread(conn, %{"title" => "Plans"})
