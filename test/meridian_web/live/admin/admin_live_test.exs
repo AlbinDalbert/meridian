@@ -18,12 +18,18 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
     assert html =~ "Default persona"
 
     assert lv
-           |> form("#user-form", user: %{name: "Ada"}, persona: %{model: "nope"})
+           |> form("#user-form",
+             user: %{name: "Ada", email: "ada@example.com"},
+             persona: %{model: "nope"}
+           )
            |> render_submit() =~ "is not offered by the upstream"
 
     {:ok, _lv, html} =
       lv
-      |> form("#user-form", user: %{name: "Ada"}, persona: %{model: "qwen"})
+      |> form("#user-form",
+        user: %{name: "Ada", email: "ada@example.com"},
+        persona: %{model: "qwen"}
+      )
       |> render_submit()
       |> follow_redirect(conn)
 

@@ -1,6 +1,7 @@
 defmodule Meridian.Accounts.User do
   @moduledoc """
-  A Meridian user. Users are created by the operator; there is no signup.
+  A Meridian user. Users are created by the operator; there is no signup. Every user has an
+  email, unique case-insensitively: it is how a sign-in with the OIDC provider finds its user.
 
   Clients identify a user with one of the user's API keys, or with an access token from the
   configured OIDC provider (see `Meridian.OIDC`). A user's OIDC identity (`oidc_issuer` +
@@ -31,7 +32,7 @@ defmodule Meridian.Accounts.User do
     |> cast(attrs, [:name, :email])
     |> update_change(:name, &String.trim/1)
     |> update_change(:email, &String.trim/1)
-    |> validate_required([:name])
+    |> validate_required([:name, :email])
     |> validate_length(:name, max: 200)
     |> validate_format(:email, ~r/^[^@\s]+@[^@\s]+$/, message: "must be a valid email address")
     |> unique_constraint(:email, name: :users_email_index)

@@ -79,21 +79,19 @@ defmodule MeridianWeb.Admin.OIDCController do
     end
   end
 
-  # Exchanges the code and returns the verified email from the ID token, or from the userinfo
-  # endpoint if the ID token doesn't carry one.
+  # Exchanges the code and returns the verified email.
   defp authenticate(code, flow) do
     config = AdminAuth.admin_oidc()
 
-    with {:ok, %{"id_token" => id_token} = tokens} <-
-           OIDC.exchange_code(
+    with {:ok, claims} <-
+           OIDC.complete_sign_in(
              client_id: config[:client_id],
              client_secret: config[:client_secret],
              redirect_uri: redirect_uri(),
              code: code,
-             code_verifier: flow.verifier
-           ),
-         {:ok, claims} <- OIDC.verify_token(id_token, [config[:client_id]], nonce: flow.nonce),
-         {:ok, claims} <- with_email(claims, tokens) do
+             code_verifier: flow.verifier,
+             nonce: flow.nonce
+           ) do
       cond do
         not is_binary(claims["email"]) -> {:error, :no_email}
         claims["email_verified"] == false -> {:error, :email_unverified}
@@ -105,17 +103,6 @@ defmodule MeridianWeb.Admin.OIDCController do
         error
     end
   end
-
-  defp with_email(%{"email" => email} = claims, _tokens) when is_binary(email), do: {:ok, claims}
-
-  defp with_email(%{"sub" => subject} = claims, %{"access_token" => access_token}) do
-    case OIDC.userinfo(access_token) do
-      {:ok, %{"sub" => ^subject} = info} -> {:ok, Map.merge(claims, info)}
-      _ -> {:error, :no_email}
-    end
-  end
-
-  defp with_email(_claims, _tokens), do: {:error, :no_email}
 
   defp fail(conn, message, status \\ :unauthorized) do
     conn

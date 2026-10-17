@@ -75,7 +75,7 @@ is revoked. `EventSource` resumes on its own after a dropped connection (it send
 
 Instead of tokens and keys, operators and users can sign in through any OpenID Connect
 provider: [WorkOS AuthKit](https://workos.com/docs/authkit), Keycloak, Authentik, Google, Entra.
-Both parts are optional and independent.
+All three parts are optional and independent.
 
 **Admin console.** Set `OIDC_ISSUER`, `ADMIN_OIDC_CLIENT_ID` (and `ADMIN_OIDC_CLIENT_SECRET` for
 a confidential client), and `ADMIN_EMAILS`. `/admin/login` then shows a "Sign in" button; you
@@ -83,7 +83,23 @@ get in if the provider says your email is verified and it's in `ADMIN_EMAILS`. R
 `https://<PHX_HOST>/admin/auth/callback` as the redirect URI. `ADMIN_TOKEN` can stay set as a
 fallback for when the provider is down, or be left unset.
 
-**Clients.** Set `OIDC_AUDIENCES` to the client ids of your apps. A client then runs the login
+**Browser apps** (e.g. [xebec](../xebec)). Set `USER_OIDC_CLIENT_ID` (and
+`USER_OIDC_CLIENT_SECRET` for a confidential client). Meridian then runs the login for the app,
+like it does for `/admin`: the app links its "Sign in" button to
+`/api/auth/login?return_to=/some/path`, Meridian sends the browser to the provider and back to
+`/api/auth/callback`, and starts a session in a cookie that `/api` accepts instead of a bearer
+token. The app must be served on the same origin as `/api` (a reverse proxy routing `/api` to
+Meridian, as xebec's image does), and requests that change something must send an
+`X-Requested-With` header. `GET /api/auth/session` says whether sign-in is available and who is
+signed in; `POST /api/auth/logout` ends the session. Users are linked by email as below. Register
+`https://<app host>/api/auth/callback` as the redirect URI; behind a proxy, Meridian builds it
+from `X-Forwarded-Host` and `X-Forwarded-Proto`.
+
+This is for apps without a backend of their own. They can't run the login themselves: the
+provider's token endpoint would have to allow the app's origin for CORS, and WorkOS doesn't for
+OAuth applications.
+
+**Clients with their own login.** Set `OIDC_AUDIENCES` to the client ids of your apps. A client then runs the login
 itself (with the provider's SDK, using PKCE) and sends the access token as
 `Authorization: Bearer <token>` where it would send an API key. Meridian checks the signature
 (RS256, keys from the provider's JWKS), issuer, audience, and expiry. The first time someone
@@ -99,8 +115,11 @@ With WorkOS:
 2. Under Connect → OAuth applications, create a first-party application for the admin console
    (confidential, redirect URI as above). Its client id and secret are `ADMIN_OIDC_CLIENT_ID` and
    `ADMIN_OIDC_CLIENT_SECRET`.
-3. For each client app, create another first-party application (public, so it uses PKCE and has
-   no secret, with the app's own redirect URI) and add its client id to `OIDC_AUDIENCES`.
+3. For browser apps, create another first-party application (public is fine: Meridian uses
+   PKCE), with redirect URI `https://<app host>/api/auth/callback`. Its client id is
+   `USER_OIDC_CLIENT_ID`.
+4. For clients that run the login themselves, create a first-party application each (public,
+   with the client's own redirect URI) and add its client id to `OIDC_AUDIENCES`.
 
 Other endpoints: `GET/PATCH/DELETE /api/threads/:id`, `GET /api/runs/:id`, and
 `POST /api/runs/:id/cancel`. The admin console shows threads and runs, including a live view
@@ -145,6 +164,8 @@ docker run -p 4000:4000 \
 | `ADMIN_OIDC_CLIENT_ID` | no  | Enables admin sign-in with the provider |
 | `ADMIN_OIDC_CLIENT_SECRET` | no | The admin client's secret (confidential clients; omit for a public client) |
 | `ADMIN_EMAILS`    | with `ADMIN_OIDC_CLIENT_ID` | Comma-separated emails allowed into `/admin` |
+| `USER_OIDC_CLIENT_ID` | no   | Enables user sign-in for browser apps, through `/api/auth` |
+| `USER_OIDC_CLIENT_SECRET` | no | That client's secret (confidential clients; omit for a public client) |
 | `OIDC_AUDIENCES`  | no       | Comma-separated client ids whose access tokens `/v1` and `/api` accept. Unset means API keys only |
 
 \* Meridian starts without it, but can't serve completions.

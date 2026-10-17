@@ -39,6 +39,7 @@ config :meridian, Meridian.OIDC,
   cache_ttl: 0
 
 config :meridian, :admin_oidc, nil
+config :meridian, :user_oidc, nil
 
 # One message.delta event per upstream chunk, so tests are deterministic.
 config :meridian, Meridian.Runs, delta_flush_interval: 0

@@ -23,12 +23,17 @@ defmodule Meridian.AccountsTest do
       stub_upstream_models(["m1"])
 
       assert {:error, :persona, changeset} =
-               Accounts.create_user(%{"name" => "Ada"}, %{"model" => "nope"})
+               Accounts.create_user(%{"name" => "Ada", "email" => "ada@example.com"}, %{
+                 "model" => "nope"
+               })
 
       assert "is not offered by the upstream" in errors_on(changeset).model
       assert Accounts.list_users() == []
 
-      assert {:ok, _user} = Accounts.create_user(%{"name" => "Ada"}, %{"model" => "m1"})
+      assert {:ok, _user} =
+               Accounts.create_user(%{"name" => "Ada", "email" => "ada@example.com"}, %{
+                 "model" => "m1"
+               })
     end
 
     test "returns user errors" do
@@ -38,6 +43,15 @@ defmodule Meridian.AccountsTest do
                )
 
       assert %{name: ["can't be blank"], email: [_]} = errors_on(changeset)
+    end
+
+    test "email is required" do
+      assert {:error, :user, changeset} =
+               Accounts.create_user(%{"name" => "Ada", "email" => " "}, %{"model" => "m"},
+                 force: true
+               )
+
+      assert "can't be blank" in errors_on(changeset).email
     end
 
     test "emails are unique, case-insensitively" do

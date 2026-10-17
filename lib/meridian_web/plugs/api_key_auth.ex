@@ -8,8 +8,13 @@ defmodule MeridianWeb.Plugs.ApiKeyAuth do
   provider access tokens, which get the default policy: all of the user's personas).
   Otherwise responds `401` with an OpenAI-style error.
 
-  With `events_token: true` (run event streams only), a `?token=` query param holding the
-  run's `MeridianWeb.EventsToken` is accepted instead, for browsers' `EventSource`.
+  Without a bearer token:
+
+    * With `session: true` (`/api`), a sign-in session cookie (see `MeridianWeb.UserAuth`) is
+      accepted, like a provider access token. Requests that change something must also send
+      `X-Requested-With`, or get a `403`.
+    * With `events_token: true` (run event streams only), a `?token=` query param holding the
+      run's `MeridianWeb.EventsToken` is accepted, for browsers' `EventSource`.
   """
   @behaviour Plug
 
@@ -20,15 +25,15 @@ defmodule MeridianWeb.Plugs.ApiKeyAuth do
   alias Meridian.Accounts.ApiKey.Policy
   alias Meridian.OIDC
   alias Meridian.OIDC.JWT
-  alias MeridianWeb.EventsToken
+  alias MeridianWeb.{EventsToken, UserAuth}
   alias MeridianWeb.V1.OpenAIError
 
   @impl true
-  def init(opts), do: Keyword.validate!(opts, events_token: false)
+  def init(opts), do: Keyword.validate!(opts, events_token: false, session: false)
 
   @impl true
   def call(conn, opts) do
-    case authenticate(conn, opts[:events_token]) do
+    case authenticate(conn, opts) do
       {:ok, %ApiKey{} = api_key} ->
         conn
         |> assign(:current_api_key, api_key)
@@ -57,6 +62,14 @@ defmodule MeridianWeb.Plugs.ApiKeyAuth do
           "This sign-in has no Meridian user. Ask the operator to add a user with your email."
         )
 
+      {:error, :csrf} ->
+        OpenAIError.send_error(
+          conn,
+          403,
+          "missing_requested_with",
+          "Requests signed in with a session cookie must send an `X-Requested-With` header."
+        )
+
       {:error, :provider_unavailable} ->
         OpenAIError.send_error(
           conn,
@@ -70,11 +83,21 @@ defmodule MeridianWeb.Plugs.ApiKeyAuth do
     end
   end
 
-  defp authenticate(conn, events_token?) do
-    case bearer_token(conn) do
-      {:ok, token} -> authenticate_bearer(token)
-      :missing when events_token? -> authenticate_events_token(conn)
-      :missing -> :missing
+  defp authenticate(conn, opts) do
+    with :missing <- bearer_token(conn),
+         :missing <- if(opts[:session], do: authenticate_session(conn), else: :missing),
+         :missing <- if(opts[:events_token], do: authenticate_events_token(conn), else: :missing) do
+      :missing
+    else
+      {:ok, token} when is_binary(token) -> authenticate_bearer(token)
+      result -> result
+    end
+  end
+
+  defp authenticate_session(conn) do
+    case UserAuth.session_user(conn) do
+      nil -> :missing
+      user -> if UserAuth.csrf_safe?(conn), do: {:ok, user}, else: {:error, :csrf}
     end
   end
 

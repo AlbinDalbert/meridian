@@ -88,11 +88,13 @@ if config_env() != :test do
   oidc_issuer = env.("OIDC_ISSUER")
   oidc_audiences = env_list.("OIDC_AUDIENCES")
   admin_oidc_client_id = env.("ADMIN_OIDC_CLIENT_ID")
+  user_oidc_client_id = env.("USER_OIDC_CLIENT_ID")
   admin_emails = "ADMIN_EMAILS" |> env_list.() |> Enum.map(&String.downcase/1)
 
   cond do
-    is_nil(oidc_issuer) and (oidc_audiences != [] or admin_oidc_client_id) ->
-      raise "OIDC_AUDIENCES and ADMIN_OIDC_CLIENT_ID need OIDC_ISSUER to be set."
+    is_nil(oidc_issuer) and
+        ((oidc_audiences != [] or admin_oidc_client_id) || user_oidc_client_id) ->
+      raise "OIDC_AUDIENCES, ADMIN_OIDC_CLIENT_ID, and USER_OIDC_CLIENT_ID need OIDC_ISSUER to be set."
 
     admin_oidc_client_id && admin_emails == [] ->
       raise "ADMIN_OIDC_CLIENT_ID is set but ADMIN_EMAILS is empty, so nobody could sign in."
@@ -111,6 +113,12 @@ if config_env() != :test do
              client_secret: env.("ADMIN_OIDC_CLIENT_SECRET"),
              emails: admin_emails
            ]
+
+  # User sign-in for browser apps served on the same origin as /api (e.g. xebec).
+  config :meridian,
+         :user_oidc,
+         user_oidc_client_id &&
+           [client_id: user_oidc_client_id, client_secret: env.("USER_OIDC_CLIENT_SECRET")]
 
   # Browser apps allowed to call /v1 and /api: comma-separated origins, or "*".
   cors_allowed_origins =

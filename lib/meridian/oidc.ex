@@ -8,8 +8,9 @@ defmodule Meridian.OIDC do
     * **Verifying access tokens** that clients send instead of an API key
       (`verify_token/3`). Meridian acts as a resource server: clients run the login themselves
       and Meridian only checks the token's signature and claims.
-    * **Logging operators into `/admin`** with the authorization code flow and PKCE
-      (`authorize_url/2`, `exchange_code/2`). See `MeridianWeb.AdminAuth`.
+    * **Signing people in** with the authorization code flow and PKCE (`authorize_url/1`,
+      `complete_sign_in/1`): operators into `/admin` (see `MeridianWeb.AdminAuth`), and users
+      of browser apps into `/api` (see `MeridianWeb.UserAuth`).
 
   Endpoints and signing keys come from the provider's discovery document
   (`<issuer>/.well-known/openid-configuration`) and are cached (see `Meridian.OIDC.Cache`).
@@ -107,6 +108,34 @@ defmodule Meridian.OIDC do
       end
     end
   end
+
+  @doc """
+  Finishes an authorization code sign-in: exchanges the code (`params` as for
+  `exchange_code/1`, plus `:nonce`), then verifies the ID token for `:client_id` and `:nonce`.
+  Returns the ID token's claims, with the userinfo endpoint's merged in if the ID token carries
+  no email.
+  """
+  @spec complete_sign_in(keyword()) :: {:ok, JWT.claims()} | {:error, term()}
+  def complete_sign_in(params) do
+    client_id = Keyword.fetch!(params, :client_id)
+    nonce = Keyword.fetch!(params, :nonce)
+
+    with {:ok, %{"id_token" => id_token} = tokens} <- exchange_code(params),
+         {:ok, claims} <- verify_token(id_token, [client_id], nonce: nonce) do
+      with_email(claims, tokens)
+    end
+  end
+
+  defp with_email(%{"email" => email} = claims, _tokens) when is_binary(email), do: {:ok, claims}
+
+  defp with_email(%{"sub" => subject} = claims, %{"access_token" => access_token}) do
+    case userinfo(access_token) do
+      {:ok, %{"sub" => ^subject} = info} -> {:ok, Map.merge(claims, info)}
+      _ -> {:error, :no_email}
+    end
+  end
+
+  defp with_email(_claims, _tokens), do: {:error, :no_email}
 
   @doc "Fetches the provider's claims about the user an access token belongs to."
   def userinfo(access_token) do

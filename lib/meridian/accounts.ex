@@ -132,32 +132,52 @@ defmodule Meridian.Accounts do
     Repo.one(from k in ApiKey, where: k.id == ^id and is_nil(k.revoked_at), preload: :user)
   end
 
-  ## OIDC access tokens
+  ## OIDC identities
 
   @doc """
-  Authenticates an access token a client got from the OIDC provider (see `Meridian.OIDC`).
-
-  Returns the user whose linked identity is the token's issuer and subject. The first time a
-  subject is seen, it is linked to the user with the same email, as reported by the provider's
-  userinfo endpoint (and not marked unverified). There is no signup: without a matching user,
-  this returns `{:error, :unknown_user}`. A user already linked to another identity is never
-  relinked.
+  Authenticates an access token a client got from the OIDC provider (see `Meridian.OIDC`), and
+  returns its user (see `user_for_identity/3`). The email for a first sign-in comes from the
+  provider's userinfo endpoint.
   """
   @spec authenticate_access_token(String.t()) ::
           {:ok, User.t()} | {:error, :unknown_user | :provider_unavailable | atom()}
   def authenticate_access_token(token) when is_binary(token) do
     with {:ok, %{"iss" => issuer, "sub" => subject}} <-
            OIDC.verify_token(token, OIDC.audiences()) do
-      case Repo.get_by(User, oidc_issuer: issuer, oidc_subject: subject) do
-        %User{} = user -> {:ok, user}
-        nil -> link_by_email(token, issuer, subject)
-      end
+      user_for_identity(issuer, subject, fn -> OIDC.userinfo(token) end)
     end
   end
 
-  defp link_by_email(token, issuer, subject) do
+  @doc """
+  Returns the user whose linked identity is `issuer` and `subject` at the OIDC provider.
+
+  The first time a subject is seen, it is linked to the user with the same email. `profile` is
+  called only then, and returns the provider's claims about the person (`"sub"`, `"email"`,
+  `"email_verified"`); an email marked unverified isn't used. There is no signup: without a
+  matching user, this returns `{:error, :unknown_user}`. A user already linked to another
+  identity is never relinked.
+  """
+  @spec user_for_identity(String.t(), String.t(), (-> {:ok, map()} | {:error, term()})) ::
+          {:ok, User.t()} | {:error, :unknown_user | :provider_unavailable}
+  def user_for_identity(issuer, subject, profile)
+      when is_binary(issuer) and is_binary(subject) do
+    case Repo.get_by(User, oidc_issuer: issuer, oidc_subject: subject) do
+      %User{} = user -> {:ok, user}
+      nil -> link_by_email(issuer, subject, profile)
+    end
+  end
+
+  @doc """
+  Gets user `id` if it is still linked to the identity `issuer` and `subject`. For sign-in
+  sessions: deleting the user or unlinking the identity ends them.
+  """
+  def get_linked_user(id, issuer, subject) do
+    Repo.get_by(User, id: id, oidc_issuer: issuer, oidc_subject: subject)
+  end
+
+  defp link_by_email(issuer, subject, profile) do
     with {:ok, %{"sub" => ^subject, "email" => email} = info} when is_binary(email) <-
-           OIDC.userinfo(token),
+           profile.(),
          true <- info["email_verified"] != false,
          %User{oidc_subject: nil} = user <- get_user_by_email(email) do
       user

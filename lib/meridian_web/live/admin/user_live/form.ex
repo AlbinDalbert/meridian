@@ -47,7 +47,7 @@ defmodule MeridianWeb.Admin.UserLive.Form do
 
       <.form for={@form} id="user-form" class="card" phx-change="validate" phx-submit="save">
         <.input field={@form[:name]} label="Name" required />
-        <.input field={@form[:email]} type="email" label="Email (optional)" />
+        <.input field={@form[:email]} type="email" label="Email" required />
 
         <%= if @live_action == :new do %>
           <h2>Default persona</h2>

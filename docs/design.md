@@ -423,7 +423,8 @@ permissions and see everything. Remote extensions see only what their hook subsc
 
 ## Identity: users, API keys, policies
 
-- **Users** are generic: id, display name, optional email. There is no signup. Users are
+- **Users** are generic: id, display name, email (required, unique case-insensitively, since
+  it is how a first sign-in finds its user). There is no signup. Users are
   created by the operator in the [admin UI](#admin-ui).
 - **API keys** identify a user to clients, one per client/purpose. Minted in the admin UI (and
   later self-service via `/api/keys`). Format `mrd_<random>`, shown once, stored as a SHA-256
@@ -438,8 +439,18 @@ permissions and see everything. Remote extensions see only what their hook subsc
   without a matching user the request is refused. The operator can unlink in the admin UI.
   Signed-in users get the default policy (all their personas). Run events tokens are tied to
   the user instead of a key. Access tokens aren't checked for revocation; they are short-lived.
+- **Sign-in sessions** (optional, `USER_OIDC_CLIENT_ID`) are for browser apps without a backend,
+  such as xebec. They can't run the login themselves: the code-for-token exchange is a browser
+  request to the provider's token endpoint, which needs CORS from the provider, and WorkOS
+  doesn't allow it for OAuth applications. So Meridian runs it under `/api/auth` (login,
+  callback, session, logout), exactly like admin sign-in, links the user the same way, and keeps
+  a signed cookie (`SameSite=Lax`, path `/api`, 14 days) with the user id and linked identity;
+  deleting the user or unlinking ends it. `/api` accepts the cookie when there is no bearer
+  token. The app must be on Meridian's origin (its reverse proxy forwards `/api`); CORS still
+  never allows credentials. Requests that change something need `X-Requested-With`, so a sibling
+  subdomain (same site, so the cookie goes along) can't forge them with a plain form.
 - **Client contract.** Whatever the credential, a client sends one bearer token and gets a
-  user. Meridian knows nothing about specific clients or how they got their token, so any
+  user. Browser apps on Meridian's origin may send the sign-in cookie instead. Meridian knows nothing about specific clients or how they got their token, so any
   number of clients can share it. Generic OpenAI clients use API keys; apps with a sign-in
   button use the provider.
 - Credentials are never mixed between roles: **API keys** and **OIDC access tokens**
@@ -498,7 +509,7 @@ Writing a first memory extension is the real test of the extension API.
 All ids are UUIDv7 (time-ordered). Timestamps are `utc_datetime_usec`.
 
 ```text
-users           id, name, email?, inserted_at
+users           id, name, email, oidc_issuer?, oidc_subject?, inserted_at
 api_keys        id, user_id, name, prefix, token_hash, policy jsonb, last_used_at, revoked_at
 personas        id, user_id, slug, name, system_prompt, model, params jsonb,
                 extensions jsonb, is_default
@@ -541,6 +552,7 @@ is in the repo.
 | `OIDC_ISSUER`          | OIDC provider for sign-in (admin and clients), exactly as its tokens' `iss` |
 | `ADMIN_OIDC_CLIENT_ID`, `ADMIN_OIDC_CLIENT_SECRET` | Admin sign-in client (the secret only for confidential clients) |
 | `ADMIN_EMAILS`         | Emails allowed into `/admin` via sign-in (comma-separated) |
+| `USER_OIDC_CLIENT_ID`, `USER_OIDC_CLIENT_SECRET` | User sign-in for browser apps (`/api/auth`) |
 | `OIDC_AUDIENCES`       | Client ids whose access tokens `/v1` and `/api` accept. Unset = API keys only |
 | `EXTENSIONS_DIR`       | Optional directory of `.ex` extensions compiled at boot (if we do that) |
 
@@ -644,8 +656,9 @@ Add an entry whenever a decision is made or reversed.
 | **Admin UI is LiveView in the same release** | Separate SPA (e.g. TS) | One deployable, no extra API client or CORS. The live run view subscribes to the same PubSub topics as clients. No Node toolchain: the LiveView JS can be served from the dependency. |
 | **Admin auth via deployment secret `ADMIN_TOKEN`** | Admin scope on user API keys, user passwords | Operating the instance and using it are different roles with different credentials. Also removes the need for a bootstrap command. |
 | **OIDC sign-in for admin, with an `ADMIN_EMAILS` allowlist; `ADMIN_TOKEN` stays as an optional fallback** | WorkOS-specific integration (its User Management API or SDK); a proxy in front (oauth2-proxy, Cloudflare Access); token only | No long secret to keep and paste. Generic OIDC works with WorkOS AuthKit and any other provider, so deployments pick their own. The allowlist is needed because a provider only says who someone is, not that they operate this instance. Hand-rolled with Req and `:crypto` (RS256 only) instead of a JOSE dependency. |
-| **Clients may authenticate with OIDC access tokens; Meridian is a resource server, not an authorization server** | Meridian running the login and minting its own tokens or API keys per client; cookie sessions for `/api` | Keeps one client contract (a bearer token) and keeps Meridian ignorant of clients. Clients use the provider's SDKs; Meridian only verifies. No cookies keeps the CORS reasoning intact. API keys stay for generic clients. |
+| ~~**Clients may authenticate with OIDC access tokens; Meridian is a resource server, not an authorization server**~~ *Amended, see "Meridian runs the login for browser apps" below* | Meridian running the login and minting its own tokens or API keys per client; cookie sessions for `/api` | Keeps one client contract (a bearer token) and keeps Meridian ignorant of clients. Clients use the provider's SDKs; Meridian only verifies. No cookies keeps the CORS reasoning intact. API keys stay for generic clients. |
 | **Sign-ins link to existing users by verified email; no signup** | Auto-creating users on first sign-in; the operator entering provider subject ids | Users stay operator-created. Email is what the operator already knows; the subject is stored on first sign-in so later changes to the email don't move the account. Never relinking a linked user stops a new identity with the same email from taking over. |
+| **Meridian runs the login for browser apps, with a cookie session on `/api`** (amends "Meridian is a resource server") | The app proxying the provider's token endpoint to get around CORS; a separate backend per app; the provider's browser SDK (a different WorkOS product, with its own tokens) | A static app can't trade the code for tokens: WorkOS's token endpoint doesn't send CORS headers for OAuth applications. Meridian already runs this flow for `/admin` and owns users and identities, so it owns the whole sign-in and apps stay ignorant of the provider. The cookie is same-origin only, so the CORS reasoning holds. Access tokens (`OIDC_AUDIENCES`) stay for clients that log in themselves. |
 | **Generic and environment-agnostic** | Assuming a specific inference server or cluster | Public project. Everything deployment-specific comes from env vars; deployment values live in the operator's own infrastructure repo. |
 | **Persona resolution on `/v1`**: `meridian/<slug>` → that persona (404 if unknown or not allowed); a raw upstream id → passthrough when `EXPOSE_UPSTREAM_MODELS`; anything else → the key's `default_persona`, else the user's default persona | Rejecting unknown models; falling back for unknown `meridian/` slugs too | Clients with a hardcoded model name (`gpt-4o`) still work, but a typo in an explicit persona id fails loudly instead of silently using the wrong persona. |
 | **Persona system prompt goes first, merged into the client's leading system/developer message** | A separate extra system message; appending after the client's | Some chat templates reject more than one system message or one that isn't first. The persona's identity comes before the client's (e.g. a coding agent's) instructions. |

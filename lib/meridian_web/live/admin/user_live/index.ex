@@ -24,7 +24,7 @@ defmodule MeridianWeb.Admin.UserLive.Index do
         <:col :let={user} label="Name">
           <.link navigate={~p"/admin/users/#{user}"}>{user.name}</.link>
         </:col>
-        <:col :let={user} label="Email">{user.email || "—"}</:col>
+        <:col :let={user} label="Email">{user.email}</:col>
         <:col :let={user} label="Created">{format_time(user.inserted_at)}</:col>
       </.table>
     </Layouts.app>

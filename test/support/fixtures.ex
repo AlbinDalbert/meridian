@@ -11,7 +11,10 @@ defmodule Meridian.Fixtures do
   def user_fixture(attrs \\ %{}, persona_attrs \\ %{}) do
     {:ok, user} =
       Accounts.create_user(
-        Map.merge(%{"name" => unique_name("user")}, attrs),
+        Map.merge(
+          %{"name" => unique_name("user"), "email" => unique_name("user") <> "@example.com"},
+          attrs
+        ),
         Map.merge(%{"model" => "upstream-model"}, persona_attrs),
         force: true
       )

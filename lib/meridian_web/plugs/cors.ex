@@ -4,9 +4,10 @@ defmodule MeridianWeb.Plugs.CORS do
   them. Never applies to `/admin`.
 
   Allowed origins come from `CORS_ALLOWED_ORIGINS` (comma-separated, or `*`); unset means no
-  cross-origin access. Credentials (cookies) are never allowed: the APIs authenticate with
-  API keys only, so a page can't act for a user unless it has their key. That is also why
-  allowing `*` is reasonable.
+  cross-origin access. Credentials (cookies) are never allowed: cross-origin, the APIs
+  authenticate with bearer tokens only, so a page can't act for a user unless it has their key
+  or token. (Sign-in session cookies only work on the same origin; see `MeridianWeb.UserAuth`.)
+  That is also why allowing `*` is reasonable.
 
   Preflight (`OPTIONS`) requests are answered here and halted. Requested headers are allowed
   as asked, since clients such as the OpenAI SDK send their own `x-` headers.

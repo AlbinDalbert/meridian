@@ -6,13 +6,13 @@ defmodule MeridianWeb.Router do
   # The native API. Authenticated like /v1; errors use the same shape.
   pipeline :api do
     plug :accepts, ["json"]
-    plug MeridianWeb.Plugs.ApiKeyAuth
+    plug MeridianWeb.Plugs.ApiKeyAuth, session: true
   end
 
   # Server-sent event streams. No `accepts`: clients send `Accept: text/event-stream`. Also
   # accepts a run's events token in the query string, for browsers' EventSource.
   pipeline :api_stream do
-    plug MeridianWeb.Plugs.ApiKeyAuth, events_token: true
+    plug MeridianWeb.Plugs.ApiKeyAuth, events_token: true, session: true
   end
 
   # The OpenAI-compatible surface. No `accepts` here: OpenAI clients send all sorts of Accept
@@ -21,7 +21,8 @@ defmodule MeridianWeb.Router do
     plug MeridianWeb.Plugs.ApiKeyAuth
   end
 
-  # Cookie sessions exist only in this pipeline; the APIs are API-key-only.
+  # The admin console's cookie session. The APIs' own sign-in session is separate (see
+  # MeridianWeb.UserAuth).
   pipeline :admin do
     plug :require_admin_enabled
     plug :accepts, ["html"]
@@ -43,6 +44,15 @@ defmodule MeridianWeb.Router do
 
     get "/models", ModelController, :index
     post "/chat/completions", ChatCompletionController, :create
+  end
+
+  # Signing users of browser apps in (see MeridianWeb.UserAuth). Unauthenticated: these start
+  # and end sessions.
+  scope "/api/auth", MeridianWeb.Api do
+    get "/session", AuthController, :show
+    get "/login", AuthController, :login
+    get "/callback", AuthController, :callback
+    post "/logout", AuthController, :logout
   end
 
   scope "/api", MeridianWeb.Api do
