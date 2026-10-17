@@ -103,6 +103,9 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .field textarea { min-height: 8rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; }
 .field-checkbox label, .check { display: flex; gap: 0.5rem; align-items: center; font-weight: normal; }
+.extension > .field { margin-bottom: 0.6rem; }
+.extension > .field:not(.field-checkbox) { margin-left: 1.6rem; }
+.extension textarea { min-height: 4rem; }
 .check { margin-bottom: 0.25rem; }
 .hint { color: var(--muted); font-size: 0.85rem; margin: 0.25rem 0 0; }
 .error { color: var(--danger); font-size: 0.85rem; margin: 0.25rem 0 0; }

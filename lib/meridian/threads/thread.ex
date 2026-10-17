@@ -7,6 +7,8 @@ defmodule Meridian.Threads.Thread do
 
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   schema "threads" do
     field :title, :string
 

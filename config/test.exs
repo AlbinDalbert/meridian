@@ -33,6 +33,11 @@ config :meridian, :admin_token, "test-admin-token-0123456789abcdefghijklmnopqrst
 # One message.delta event per upstream chunk, so tests are deterministic.
 config :meridian, Meridian.Runs, delta_flush_interval: 0
 
+# Meridian.TestExtension (test/support) reports its hook calls to the test that enabled it.
+config :meridian, :extensions, [Meridian.Ext.Datetime, Meridian.Ext.Title, Meridian.TestExtension]
+
+config :meridian, Meridian.Extensions, hook_timeout: 200
+
 # Jobs are executed explicitly in tests (see Oban.Testing)
 config :meridian, Oban, testing: :manual
 

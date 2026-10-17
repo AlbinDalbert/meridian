@@ -2,6 +2,9 @@ defmodule Meridian.Personas.Persona do
   @moduledoc """
   A named bundle of system prompt, upstream model, and default params, presented to clients as
   the model `meridian/<slug>`.
+
+  `extensions` maps the name of each extension the persona enables to its settings (see
+  `Meridian.Extensions`).
   """
   use Meridian.Schema
 
@@ -28,7 +31,9 @@ defmodule Meridian.Personas.Persona do
   @doc false
   def changeset(persona, attrs) do
     persona
-    |> cast(attrs, [:slug, :name, :system_prompt, :model, :params], empty_values: [nil])
+    |> cast(attrs, [:slug, :name, :system_prompt, :model, :params, :extensions],
+      empty_values: [nil]
+    )
     |> update_change(:slug, &String.trim/1)
     |> update_change(:name, &String.trim/1)
     |> update_change(:model, &String.trim/1)
@@ -42,6 +47,9 @@ defmodule Meridian.Personas.Persona do
         do: [params: "must not set \"model\" or \"messages\""],
         else: []
     end)
+    |> validate_change(:extensions, fn :extensions, extensions ->
+      Enum.map(Meridian.Extensions.settings_errors(extensions), &{:extensions, &1})
+    end)
     |> unique_constraint(:slug, name: :personas_user_id_slug_index)
   end
 
@@ -54,7 +62,7 @@ defmodule Meridian.Personas.Persona do
   def slug_from_model_id(@model_prefix <> slug) when slug != "", do: {:ok, slug}
   def slug_from_model_id(_model_id), do: :error
 
-  @snapshot_fields ~w(id slug name system_prompt model params extensions)a
+  @snapshot_fields ~w(id user_id slug name system_prompt model params extensions)a
 
   @doc """
   The persona's configuration as a plain map, for freezing into a run (`runs.persona_snapshot`).

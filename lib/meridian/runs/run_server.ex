@@ -13,6 +13,11 @@ defmodule Meridian.Runs.RunServer do
   `finish_reason`). A stream that ends without one, or that contains an event that isn't
   valid JSON, fails the run instead of saving a truncated reply.
 
+  Enabled extensions (`Meridian.Extensions`) are called at each stage: `run_start`, then
+  `before_run` (which may reject the run), `context` and `before_model_request` while building
+  the request, `model_stream_event` for each upstream chunk, and `message_end` before the reply
+  is saved. `run_end` fires from `Meridian.Runs.finish_run/3`.
+
   Text and reasoning deltas are buffered and emitted as one `message.delta` event per
   `:delta_flush_interval` (milliseconds; `0` emits one event per upstream chunk), so the event
   log stays small and live clients and replaying clients see exactly the same events.
@@ -21,8 +26,8 @@ defmodule Meridian.Runs.RunServer do
 
   require Logger
 
-  alias Meridian.{Personas, Runs, Threads, Upstream}
-  alias Meridian.Personas.Persona
+  alias Meridian.{Extensions, Personas, Runs, Threads, Upstream}
+  alias Meridian.Extension.Context
   alias Meridian.Runs.Run
   alias Meridian.Threads.Message
   alias Meridian.Upstream.SSE
@@ -66,6 +71,9 @@ defmodule Meridian.Runs.RunServer do
       run_id: run_id,
       run: nil,
       seq: 0,
+      # Enabled extensions and their hook context, set once the run has started.
+      extensions: [],
+      ctx: nil,
       stream: nil,
       sse: SSE.new(),
       # Everything received so far, and what hasn't been emitted as a delta yet (iodata).
@@ -90,7 +98,25 @@ defmodule Meridian.Runs.RunServer do
     case Runs.start_run(state.run_id) do
       {:ok, run, started} ->
         :timer.send_interval(config(:heartbeat_interval, :timer.seconds(10)), :heartbeat)
-        request(%{state | run: run, seq: started.seq})
+        ctx = Context.for_run(run)
+
+        state = %{
+          state
+          | run: run,
+            seq: started.seq,
+            ctx: ctx,
+            extensions: Extensions.enabled(ctx.persona)
+        }
+
+        Extensions.notify(state.extensions, :run_start, [], ctx)
+
+        case request_body(state) do
+          {:ok, body} ->
+            request(state, body)
+
+          {:halt, reason} ->
+            fail(state, %{"code" => "rejected", "message" => reason})
+        end
 
       {:error, :not_queued} ->
         # Cancelled before it started, or already handled.
@@ -98,24 +124,39 @@ defmodule Meridian.Runs.RunServer do
     end
   end
 
-  defp request(state) do
-    {:ok, stream} = Upstream.Stream.start_link(request_body(state.run))
+  defp request(state, body) do
+    {:ok, stream} = Upstream.Stream.start_link(body)
     {:noreply, reset_idle_timer(%{state | stream: stream})}
   end
 
-  defp request_body(%Run{} = run) do
-    messages =
-      run.thread_id
-      |> Threads.list_messages_until(run.user_message_id)
-      |> Enum.map(&Message.to_upstream/1)
+  # Extensions shape the request in three steps: `before_run` the persona's system prompt
+  # (as sections) and params, `context` the history, `before_model_request` the final body.
+  defp request_body(%{run: run, ctx: ctx, extensions: extensions}) do
+    persona = ctx.persona
+    config = %{system_prompt: [persona.system_prompt], params: persona.params}
 
-    run.persona_snapshot
-    |> Persona.from_snapshot()
-    |> Personas.apply_to_request(%{
-      "messages" => messages,
-      "stream" => true,
-      "stream_options" => %{"include_usage" => true}
-    })
+    with {:cont, config} <- Extensions.run(extensions, :before_run, config, ctx) do
+      history =
+        run.thread_id
+        |> Threads.list_messages_until(run.user_message_id)
+        |> Enum.map(&Message.to_upstream/1)
+
+      {:cont, messages} = Extensions.run(extensions, :context, history, ctx)
+
+      system_prompt =
+        config.system_prompt |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join("\n\n")
+
+      body =
+        %{persona | system_prompt: system_prompt, params: config.params}
+        |> Personas.apply_to_request(%{
+          "messages" => messages,
+          "stream" => true,
+          "stream_options" => %{"include_usage" => true}
+        })
+
+      {:cont, body} = Extensions.run(extensions, :before_model_request, body, ctx)
+      {:ok, body}
+    end
   end
 
   @impl true
@@ -212,6 +253,7 @@ defmodule Meridian.Runs.RunServer do
          state}
 
       {:ok, %{} = chunk} ->
+        Extensions.notify(state.extensions, :model_stream_event, [chunk], state.ctx)
         handle_events(rest, handle_chunk(chunk, state))
 
       _ ->
@@ -319,6 +361,8 @@ defmodule Meridian.Runs.RunServer do
           [{"reasoning", reasoning}, {"text", text}]
           |> Enum.reject(fn {type, text} -> type == "reasoning" and text == "" end)
           |> Enum.map(fn {type, text} -> %{"type" => type, "text" => text} end)
+
+        {:cont, content} = Extensions.run(state.extensions, :message_end, content, state.ctx)
 
         finish_reason = if status == :cancelled, do: "cancelled", else: state.finish_reason
 

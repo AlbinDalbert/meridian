@@ -12,6 +12,9 @@ defmodule Meridian.Runs do
     * `"runs"` receives `{:run_updated, %Run{}}` whenever a run's status changes (for the admin
       console).
 
+  Ending a run (`finish_run/3`, however the run ends) fires the `run_end` hook of the
+  extensions the run's persona enables.
+
   Subscribers that need every event (SSE, the admin run view) subscribe first, then replay the
   persisted events with `list_events/2`, dropping live events they already replayed (by `seq`).
   """
@@ -20,7 +23,8 @@ defmodule Meridian.Runs do
   require Logger
 
   alias Meridian.Accounts.User
-  alias Meridian.Repo
+  alias Meridian.Extension.Context
+  alias Meridian.{Extensions, Repo}
   alias Meridian.Runs.{Event, Run}
   alias Meridian.Threads.{Message, Thread}
 
@@ -208,11 +212,18 @@ defmodule Meridian.Runs do
       {:ok, {run, message, events}} ->
         Enum.each(events, &broadcast_event(run, &1))
         broadcast_run(run)
+        run_end(run)
         {:ok, run, message}
 
       error ->
         error
     end
+  end
+
+  # Every way a run ends comes through finish_run, so this fires once per run, after commit.
+  defp run_end(run) do
+    ctx = Context.for_run(run)
+    Extensions.notify(Extensions.enabled(ctx.persona), :run_end, [run], ctx)
   end
 
   defp insert_final_message(_run, nil, _seq), do: {nil, []}

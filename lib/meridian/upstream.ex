@@ -55,6 +55,26 @@ defmodule Meridian.Upstream do
     end
   end
 
+  @doc """
+  Sends a non-streaming chat completions request and returns the decoded response. For
+  background work that just wants the answer; replies to users stream (`Meridian.Upstream.Stream`).
+  """
+  @spec complete(map()) :: {:ok, map()} | {:error, term()}
+  def complete(body) when is_map(body) do
+    with {:ok, req} <- new() do
+      case Req.post(req,
+             url: "/chat/completions",
+             json: Map.put(body, "stream", false),
+             retry: false,
+             receive_timeout: config(:receive_timeout, :timer.minutes(5))
+           ) do
+        {:ok, %Req.Response{status: 200, body: %{} = response}} -> {:ok, response}
+        {:ok, %Req.Response{status: status}} -> {:error, {:unexpected_response, status}}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
   defp fetch_models do
     with {:ok, req} <- new(),
          {:ok, %Req.Response{status: 200, body: %{"data" => data}}} when is_list(data) <-

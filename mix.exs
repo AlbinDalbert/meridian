@@ -51,6 +51,7 @@ defmodule Meridian.MixProject do
       {:bandit, "~> 1.5"},
       {:oban, "~> 2.24"},
       {:req, "~> 0.7.5"},
+      {:tz, "~> 0.28.4"},
       {:phoenix_html, "~> 4.3"},
       {:phoenix_live_view, "~> 1.2"},
       {:lazy_html, "~> 0.1.13", only: :test},

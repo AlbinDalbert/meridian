@@ -13,6 +13,8 @@ defmodule Meridian.Runs.Run do
 
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   @statuses [:queued, :running, :awaiting_approval, :completed, :failed, :cancelled]
   @active_statuses [:queued, :running, :awaiting_approval]
 

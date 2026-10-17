@@ -1,7 +1,7 @@
 defmodule MeridianWeb.Admin.PersonaLive.Form do
   use MeridianWeb, :live_view
 
-  alias Meridian.{Accounts, Personas, Upstream}
+  alias Meridian.{Accounts, Extensions, Personas, Upstream}
   alias Meridian.Personas.Persona
 
   @impl true
@@ -10,6 +10,7 @@ defmodule MeridianWeb.Admin.PersonaLive.Form do
       socket
       |> apply_action(socket.assigns.live_action, params)
       |> assign(force: false)
+      |> assign_extensions()
       |> assign_upstream_models()
 
     {:ok, socket}
@@ -32,6 +33,31 @@ defmodule MeridianWeb.Admin.PersonaLive.Form do
     |> assign(page_title: "Edit #{persona.slug}", user: user, persona: persona)
     |> assign(form: to_form(Personas.change_persona(persona)))
   end
+
+  # One row per installed extension: whether it's enabled and its settings as JSON text. The
+  # persona's settings are shown merged over the defaults, so every setting is visible.
+  defp assign_extensions(socket) do
+    enabled = socket.assigns.persona.extensions
+
+    rows =
+      for module <- Extensions.installed() do
+        name = module.name()
+        settings = Map.merge(Extensions.default_settings(module), Map.get(enabled, name, %{}))
+
+        %{
+          name: name,
+          description: Extensions.description(module),
+          enabled: Map.has_key?(enabled, name),
+          settings: settings_text(settings)
+        }
+      end
+
+    installed = Enum.map(rows, & &1.name)
+    assign(socket, extensions: rows, missing_extensions: Map.keys(enabled) -- installed)
+  end
+
+  defp settings_text(settings) when map_size(settings) == 0, do: ""
+  defp settings_text(settings), do: Jason.encode!(settings, pretty: true)
 
   defp assign_upstream_models(socket) do
     case connected?(socket) && Upstream.list_models() do
@@ -91,6 +117,33 @@ defmodule MeridianWeb.Admin.PersonaLive.Form do
           spellcheck="false"
           hint={~s(A JSON object of request params clients can override, e.g. {"temperature": 0.7}.)}
         />
+        <fieldset class="field" id="persona-extensions">
+          <legend>Extensions</legend>
+          <div :for={ext <- @extensions} class="extension">
+            <.input
+              type="checkbox"
+              id={"extension-#{ext.name}"}
+              name={"extensions[#{ext.name}][enabled]"}
+              checked={ext.enabled}
+              label={ext.name}
+              hint={ext.description}
+            />
+            <.input
+              :if={ext.enabled}
+              type="textarea"
+              id={"extension-#{ext.name}-settings"}
+              name={"extensions[#{ext.name}][settings]"}
+              value={ext.settings}
+              label="Settings"
+              rows="3"
+              spellcheck="false"
+            />
+          </div>
+          <p :if={@missing_extensions != []} class="hint">
+            Not installed (kept, but ignored): {Enum.join(@missing_extensions, ", ")}
+          </p>
+          <.error :for={{message, _opts} <- @form[:extensions].errors}>{message}</.error>
+        </fieldset>
         <div class="form-actions">
           <.button phx-disable-with="Saving...">Save</.button>
           <.link navigate={~p"/admin/users/#{@user}"}>Cancel</.link>
@@ -110,7 +163,9 @@ defmodule MeridianWeb.Admin.PersonaLive.Form do
 
   @impl true
   def handle_event("validate", %{"persona" => params} = all, socket) do
-    changeset = Personas.change_persona(socket.assigns.persona, decode_params(params))
+    socket = update_extensions(socket, all["extensions"] || %{})
+    params = params |> decode_params() |> put_extensions(socket)
+    changeset = Personas.change_persona(socket.assigns.persona, params)
 
     {:noreply,
      assign(socket, form: to_form(changeset, action: :validate), force: all["force"] == "true")}
@@ -118,7 +173,8 @@ defmodule MeridianWeb.Admin.PersonaLive.Form do
 
   def handle_event("save", %{"persona" => params} = all, socket) do
     force = all["force"] == "true"
-    params = decode_params(params)
+    socket = update_extensions(socket, all["extensions"] || %{})
+    params = params |> decode_params() |> put_extensions(socket)
 
     result =
       case socket.assigns.live_action do
@@ -135,6 +191,54 @@ defmodule MeridianWeb.Admin.PersonaLive.Form do
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset), force: force)}
+    end
+  end
+
+  # Keeps the extension rows in sync with what was submitted. An extension that was just
+  # switched on has no settings box yet, so it keeps the settings it was rendered with.
+  defp update_extensions(socket, submitted) do
+    rows =
+      for ext <- socket.assigns.extensions do
+        case submitted[ext.name] do
+          %{} = params ->
+            %{
+              ext
+              | enabled: params["enabled"] == "true",
+                settings: params["settings"] || ext.settings
+            }
+
+          nil ->
+            ext
+        end
+      end
+
+    assign(socket, extensions: rows)
+  end
+
+  # The persona's `extensions`: the enabled rows with their settings, plus entries for
+  # extensions that aren't installed, which are kept as they were. Settings that aren't a JSON
+  # object are passed on as text, so the changeset rejects them.
+  defp put_extensions(attrs, socket) do
+    kept = Map.take(socket.assigns.persona.extensions, socket.assigns.missing_extensions)
+
+    enabled =
+      for %{enabled: true} = ext <- socket.assigns.extensions, into: %{} do
+        {ext.name, decode_json_object(ext.settings)}
+      end
+
+    Map.put(attrs, "extensions", Map.merge(kept, enabled))
+  end
+
+  defp decode_json_object(text) do
+    case String.trim(text) do
+      "" ->
+        %{}
+
+      trimmed ->
+        case Jason.decode(trimmed) do
+          {:ok, map} when is_map(map) -> map
+          _ -> text
+        end
     end
   end
 

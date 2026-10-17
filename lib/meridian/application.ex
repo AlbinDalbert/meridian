@@ -13,6 +13,9 @@ defmodule Meridian.Application do
       {DNSCluster, query: Application.get_env(:meridian, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Meridian.PubSub},
       Meridian.Upstream.ModelCache,
+      # Extension hook handlers run here. Before the run supervisor, so it outlives the runs on
+      # shutdown (an interrupted run still fires run_end).
+      {Task.Supervisor, name: Meridian.Extensions.TaskSupervisor},
       {Registry, keys: :unique, name: Meridian.Runs.Registry},
       {DynamicSupervisor, name: Meridian.Runs.Supervisor, strategy: :one_for_one},
       # After the run supervisor, so on shutdown Oban stops (and stops taking runs) first.

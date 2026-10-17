@@ -9,7 +9,8 @@ defmodule Meridian.Threads do
 
   alias Meridian.Accounts.ApiKey.Policy
   alias Meridian.Accounts.User
-  alias Meridian.{Personas, Repo}
+  alias Meridian.{Extensions, Personas, Repo}
+  alias Meridian.Extension.Context
   alias Meridian.Personas.Persona
   alias Meridian.Runs.{Run, Worker}
   alias Meridian.Threads.{Message, Thread}
@@ -49,10 +50,13 @@ defmodule Meridian.Threads do
   def create_thread(%User{} = user, %Policy{} = policy, attrs) do
     slug = persona_slug(attrs["persona"])
 
-    with {:ok, persona} <- Personas.resolve_persona(user, policy, slug) do
-      %Thread{user_id: user.id, persona_id: persona.id, persona: persona}
-      |> Thread.changeset(attrs)
-      |> Repo.insert()
+    with {:ok, persona} <- Personas.resolve_persona(user, policy, slug),
+         {:ok, thread} <-
+           %Thread{user_id: user.id, persona_id: persona.id, persona: persona}
+           |> Thread.changeset(attrs)
+           |> Repo.insert() do
+      notify_extensions(:thread_created, thread, persona)
+      {:ok, thread}
     end
   end
 
@@ -77,13 +81,52 @@ defmodule Meridian.Threads do
     end
   end
 
+  @doc """
+  Sets a thread's title without touching anything else (its `updated_at` included, so the
+  thread doesn't move up the list). With `only_if_untitled: true`, a title that is already
+  set (e.g. by the user) is left alone and `{:error, :titled}` is returned.
+  """
+  def set_title(thread_id, title, opts \\ []) when is_binary(title) do
+    query = from t in Thread, where: t.id == ^thread_id
+    query = if opts[:only_if_untitled], do: where(query, [t], is_nil(t.title)), else: query
+
+    case Repo.update_all(query, set: [title: title]) do
+      {1, _} ->
+        :ok
+
+      {0, _} ->
+        if Repo.exists?(from t in Thread, where: t.id == ^thread_id),
+          do: {:error, :titled},
+          else: {:error, :not_found}
+    end
+  end
+
   @doc "Deletes a thread with its messages and runs. Fails while the thread has an active run."
   def delete_thread(%Thread{} = thread) do
     if Repo.exists?(
          from r in Run, where: r.thread_id == ^thread.id and r.status in ^Run.active_statuses()
-       ),
-       do: {:error, :run_active},
-       else: Repo.delete(thread)
+       ) do
+      {:error, :run_active}
+    else
+      %{persona: persona} = thread = Repo.preload(thread, :persona)
+
+      with {:ok, thread} <- Repo.delete(thread) do
+        notify_extensions(:thread_deleted, thread, persona)
+        {:ok, thread}
+      end
+    end
+  end
+
+  # Thread hooks use the persona's current settings (there is no run to freeze them in).
+  defp notify_extensions(_hook, _thread, nil), do: :ok
+
+  defp notify_extensions(hook, thread, persona) do
+    Extensions.notify(
+      Extensions.enabled(persona),
+      hook,
+      [thread],
+      Context.for_thread(thread, persona)
+    )
   end
 
   ## Messages

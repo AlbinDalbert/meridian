@@ -325,10 +325,11 @@ Modeled on pi's extension API, minus the client/UI parts (Meridian is a server):
 
 ### Hook points
 
-Handlers run in the process where the lifecycle event happens: the `RunServer` for everything
-inside a run. `run_end` fires once the run's final state is committed, from whichever process
-ended it (the `RunServer`, the janitor, a cancel of a queued run), and never inside the
-transaction. Handlers run in priority order (then registration order). Each returns
+Hooks are called from the process where the lifecycle event happens: the `RunServer` for
+everything inside a run. `run_end` fires once the run's final state is committed, from whichever
+process ended it (the `RunServer`, the janitor, a cancel of a queued run), and never inside the
+transaction. Each handler runs in its own supervised task with a timeout (5 s by default), in
+priority order (then installation order). Each returns
 `{:cont, value}` to pass a (possibly modified) value on, or `{:halt, reason}` where halting is
 allowed.
 
@@ -341,7 +342,7 @@ persona.
 |--------------------|-----------------------|-----------|-----------|
 | `run_start`        | Run, thread, persona. Observe; set up per-run state | No | v0 |
 | `before_run`       | System prompt sections, tool set, model params for this run | Yes (reject run) | v0 |
-| `context`          | The message list about to be sent (inject, trim, summarize, rewrite) | No | v0 |
+| `context`          | The conversation history about to be sent, without the system prompt (inject, trim, summarize, rewrite) | No | v0 |
 | `before_model_request` | The final upstream request body (model routing, params) | No | v0 |
 | `model_stream_event` | Raw stream events. Read-only, must be fast | No | v0 |
 | `tool_call`        | Tool name + arguments (rewrite) | Yes (block → error result to the model) | With the tool loop |
@@ -357,8 +358,13 @@ is what "built on the public extension API" means, and it is what the built-in e
 tested against. Extension background jobs run on a shared `extensions` Oban queue and must be
 idempotent.
 
+`before_run` gets the system prompt as a list of sections (the persona's first); they are joined
+with blank lines, and the result goes first in the request as for `/v1` (merged into a leading
+system message from `context`, if there is one).
+
 Failure semantics (borrowed from pi): handlers are wrapped with a timeout and `try/rescue`. A
-crashing **observer** is logged and skipped (fail-open). A crashing **`tool_call`** handler
+crashing, hanging, or invalid-returning **observer or chained handler** is logged and skipped
+(fail-open): the next handler gets the value as it was. A crashing **`tool_call`** handler
 blocks the tool (fail-closed). An extension crash never takes down the run, and never the node.
 
 ### How extensions are delivered
@@ -559,15 +565,15 @@ reconnect, and see the full reply.*
 Deferred from slice 2 (see the decision log): crash recovery by resuming runs (`run_steps`,
 `step.restarted`), `if_busy: queue | interrupt`, the thread-level SSE stream.
 
-**Slice 3: extension API v0.** *Done when: two built-in extensions, enabled per persona, work
+**Slice 3: extension API v0.** ✅ *Done when: two built-in extensions, enabled per persona, work
 using only the public extension API.*
 
 1. `Meridian.Extension` behaviour, the hook pipeline (every v0 hook in
    [Hook points](#hook-points), with timeouts and fail-open/closed semantics), and the
    `Meridian.Extension.API` facade.
 2. Per-persona enablement and settings, including the admin persona form.
-3. `datetime` extension: injects the current date and time into the context (`context` hook),
-   with a per-persona timezone setting.
+3. `datetime` extension: adds the current date and time to the system prompt (`before_run`
+   hook), with a per-persona timezone setting.
 4. `title` extension: after a thread's first completed run, a background job asks the model for
    a title and sets it only if the thread still has none (`run_end` hook, Oban job, model call
    from an extension). Clients see it the next time they fetch the thread.
@@ -634,6 +640,11 @@ Add an entry whenever a decision is made or reversed.
 | **API key policy overrides for extensions are deferred** | Building deploy → persona → key merging now | Runs don't record which key started them, so background work couldn't apply the key layer. Per-persona settings cover the need for now. |
 | **Extensions call the core only through `Meridian.Extension.API`** | Extensions calling internal contexts (`Threads`, `Upstream`) | Gives "built only on the public extension API" a real meaning and keeps the core free to change internally. |
 | **`run_end` fires after the run's final state is committed, from whichever process ended it** | Only from the `RunServer` | Runs also end in the janitor, the worker (crash), and when a queued run is cancelled. Every end fires the hook exactly once, and handlers never run inside the transaction. |
+| **Hook handlers run in a supervised task with a timeout, not in the caller** | `try/rescue` in the calling process | A handler that hangs can't stall the `RunServer` (it must keep handling cancels and heartbeats), and a crash can't take the caller down. Spawning a process is cheap on the BEAM; handlers that aren't implemented cost nothing. |
+| **Extension settings are edited as JSON per extension** in the admin persona form | A typed settings schema rendered as fields | One generic form for every extension, like persona params. Extensions validate their own settings (`validate_settings/1`). A schema can come later if the JSON gets in the way. |
+| **Thread hooks use the persona's current settings** | Freezing them | There is no run to freeze them in. |
+| **Generated titles don't bump `updated_at` and aren't pushed to clients** | A `thread.updated` event | A title isn't activity, so the thread shouldn't move up the list. Clients see it on their next fetch; a push can come with a thread-level event stream. |
+| **Timezones via the `tz` package** | UTC offsets only | Elixir only ships UTC. Named zones with daylight saving need a timezone database; `tz` is small and has no runtime dependencies. |
 | **Slice 3 is proven by two tiny extensions (`datetime`, `title`); memory gets its own slice; Channels are dropped for now** | Title generation alone; memory in slice 3; Channels in slice 3 | Titles alone only exercise `run_end`. Memory's design (e.g. shared across personas or not) is a memory question, not an API one. No client needs WebSockets yet. |
 
 ## Open questions

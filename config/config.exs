@@ -11,10 +11,18 @@ config :meridian,
   ecto_repos: [Meridian.Repo],
   generators: [timestamp_type: :utc_datetime_usec, binary_id: true]
 
+# Installed extensions (see Meridian.Extension). Each one is off until a persona enables it.
+config :meridian, :extensions, [Meridian.Ext.Datetime, Meridian.Ext.Title]
+
+# Extension hook handlers that take longer than this (milliseconds) are skipped.
+config :meridian, Meridian.Extensions, hook_timeout: :timer.seconds(5)
+
+config :elixir, :time_zone_database, Tz.TimeZoneDatabase
+
 config :meridian, Oban,
   engine: Oban.Engines.Basic,
   repo: Meridian.Repo,
-  queues: [default: 10, runs: 50],
+  queues: [default: 10, runs: 50, extensions: 10],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     # Jobs of a node that died are left "executing"; this discards them (runs aren't retried).

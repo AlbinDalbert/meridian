@@ -11,6 +11,8 @@ defmodule Meridian.Threads.Message do
 
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   @roles ~w(user assistant)
 
   schema "messages" do

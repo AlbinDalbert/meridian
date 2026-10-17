@@ -98,6 +98,49 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
     assert Personas.get_persona!(persona.id).system_prompt == "Be terse."
   end
 
+  test "enabling and configuring extensions on a persona", %{conn: conn} do
+    user = user_fixture()
+    stub_upstream_models(["upstream-model"])
+    persona = Personas.get_default_persona(user)
+
+    {:ok, _persona} =
+      Personas.update_persona(persona, %{"extensions" => %{"gone" => %{"x" => 1}}})
+
+    {:ok, lv, html} = live(conn, ~p"/admin/personas/#{persona}/edit")
+    assert html =~ "Not installed (kept, but ignored): gone"
+    refute has_element?(lv, "#extension-datetime-settings")
+
+    # Switching an extension on shows its settings, with the defaults filled in.
+    lv
+    |> form("#persona-form", extensions: %{datetime: %{enabled: "true"}})
+    |> render_change()
+
+    assert lv |> element("#extension-datetime-settings") |> render() =~ "Etc/UTC"
+
+    assert lv
+           |> form("#persona-form",
+             extensions: %{datetime: %{enabled: "true", settings: ~s({"timezone": "Nowhere"})}}
+           )
+           |> render_submit() =~ "unknown timezone"
+
+    {:ok, _lv, _html} =
+      lv
+      |> form("#persona-form",
+        extensions: %{
+          datetime: %{enabled: "true", settings: ~s({"timezone": "Europe/Stockholm"})},
+          title: %{enabled: "true"}
+        }
+      )
+      |> render_submit()
+      |> follow_redirect(conn)
+
+    assert Personas.get_persona!(persona.id).extensions == %{
+             "datetime" => %{"timezone" => "Europe/Stockholm"},
+             "title" => %{"model" => nil},
+             "gone" => %{"x" => 1}
+           }
+  end
+
   test "making a persona the default and deleting personas", %{conn: conn} do
     user = user_fixture()
     persona = persona_fixture(user, %{"slug" => "coder"})
