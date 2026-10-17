@@ -19,6 +19,10 @@ defmodule MeridianWeb.Admin.OIDCController do
   alias Meridian.OIDC
   alias MeridianWeb.AdminAuth
 
+  # The login pages are front-door pages like the request page, in the admin console's green.
+  plug :put_root_layout, html: {MeridianWeb.Layouts, :public_root}
+  plug :assign_theme
+
   @flow_cookie "_meridian_admin_oidc"
   @flow_max_age 10 * 60
 
@@ -123,4 +127,6 @@ defmodule MeridianWeb.Admin.OIDCController do
       http_only: true
     ]
   end
+
+  defp assign_theme(conn, _opts), do: assign(conn, :theme, "admin")
 end

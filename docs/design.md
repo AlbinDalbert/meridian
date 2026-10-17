@@ -227,7 +227,11 @@ still no signup.
 
 A public page where anyone can leave their email (and optionally a name) to ask to be added,
 so the operator can send friends a link instead of collecting emails by hand. It is styled
-like xebec's login (its own `public.css`) and is on whenever `/me` is.
+like xebec's login (its own `public.css`) and is on whenever `/me` is. The admin login uses
+the same front-door look and mark (`MeridianWeb.BrandComponents`) in the console's green, so
+the two can't be mistaken for each other. The same split runs through the rest: the admin
+console is green (following the system's light or dark), and `/me`, its sign-in page
+included, is xebec's amber. Both top bars carry the mark.
 
 - A valid email always gets the same "request sent" answer, whether it already has a user, a
   request, or neither, so the page doesn't reveal who has access. Emails that have a user are

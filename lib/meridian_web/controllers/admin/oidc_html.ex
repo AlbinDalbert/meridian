@@ -6,11 +6,18 @@ defmodule MeridianWeb.Admin.OIDCHTML do
   def signed_in(assigns) do
     ~H"""
     <meta http-equiv="refresh" content={"0;url=#{~p"/admin/users"}"} />
-    <Layouts.app flash={@flash} signed_in={false}>
-      <div class="login">
-        <p>Signed in. <a href={~p"/admin/users"}>Continue to the admin console</a>.</p>
+    <div class="scrim">
+      <.masthead sub="admin console" />
+      <div class="dialog">
+        <div class="bar">Signed in</div>
+        <div class="content">
+          <p>Taking you to the admin console.</p>
+          <div class="actions">
+            <a href={~p"/admin/users"} class="btn primary">Continue</a>
+          </div>
+        </div>
       </div>
-    </Layouts.app>
+    </div>
     """
   end
 end

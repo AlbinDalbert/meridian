@@ -1,4 +1,5 @@
-/* The public request page, in the look of xebec's login (its Ember palette and type). */
+/* The front-door pages (the request page and the admin login), in the look of xebec's login:
+   its Ember palette and type by default, the admin console's green with body.theme-admin. */
 
 :root {
   --bg: #0c0b09;
@@ -10,11 +11,42 @@
   --accent: #dfa13d;
   --accent-strong: #f2c96f;
   --accent-soft: rgba(223, 161, 61, 0.12);
+  --emphasis: var(--accent-strong); /* text that stands out: buttons, hovers, errors */
 
   --font-ui: "JetBrains Mono", "Liberation Mono", ui-monospace, monospace;
   --font-prose: "Iowan Old Style", Charter, "Bitstream Charter", "Liberation Serif", Georgia, serif;
 
   color-scheme: dark;
+}
+
+/* The admin login: the console's colors (see admin.css), following the system's light or dark. */
+body.theme-admin {
+  --bg: #f7f7f5;
+  --panel: #ffffff;
+  --text: #1c1c1a;
+  --text-strong: #1c1c1a;
+  --text-dim: #6b6b66;
+  --border: #e2e2dd;
+  --accent: #2f5d50;
+  --accent-strong: #5e9c87;
+  --accent-soft: rgba(47, 93, 80, 0.14);
+  --emphasis: var(--accent);
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  body.theme-admin {
+    --bg: #161615;
+    --panel: #1f1f1d;
+    --text: #e8e8e3;
+    --text-strong: #fbfbf7;
+    --text-dim: #9a9a93;
+    --border: #33332f;
+    --accent: #6fae99;
+    --accent-strong: #a6d6c5;
+    --accent-soft: rgba(111, 174, 153, 0.14);
+    --emphasis: var(--accent-strong);
+  }
 }
 
 * { box-sizing: border-box; }
@@ -87,7 +119,7 @@ body {
 .content { padding: 16px 18px 18px; }
 .content p { margin: 0 0 10px; color: var(--text-dim); }
 .content strong { color: var(--text-strong); font-weight: 400; }
-.content .error { margin: 8px 0 0; color: var(--accent-strong); }
+.content .error { margin: 8px 0 0; color: var(--emphasis); }
 
 input {
   display: block;
@@ -118,8 +150,8 @@ input::placeholder { color: var(--text-dim); }
 }
 .btn::before { content: "[ "; color: var(--text-dim); }
 .btn::after { content: " ]"; color: var(--text-dim); }
-.btn:hover { border-color: var(--accent); color: var(--accent-strong); }
-.btn.primary { border-color: var(--accent); color: var(--accent-strong); }
+.btn:hover { border-color: var(--accent); color: var(--emphasis); }
+.btn.primary { border-color: var(--accent); color: var(--emphasis); }
 
 .link {
   margin-left: auto;
@@ -127,4 +159,18 @@ input::placeholder { color: var(--text-dim); }
   color: var(--text-dim);
   text-decoration: none;
 }
-.link:hover { color: var(--accent-strong); }
+.link:hover { color: var(--emphasis); }
+
+code { font: inherit; color: var(--text-strong); }
+
+/* The admin login's token fallback, behind a toggle like xebec's "Use an API key". */
+details.token { margin-top: 16px; }
+details.token summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+details.token summary::-webkit-details-marker { display: none; }
+details.token summary:hover { color: var(--emphasis); }
+details.token[open] summary { margin-bottom: 4px; }

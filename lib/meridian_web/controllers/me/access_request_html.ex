@@ -5,11 +5,7 @@ defmodule MeridianWeb.Me.AccessRequestHTML do
   def new(assigns) do
     ~H"""
     <div class="scrim">
-      <div class="masthead">
-        <.mark />
-        <div class="word">MERIDIAN</div>
-        <div class="sub">request access</div>
-      </div>
+      <.masthead sub="request access" />
 
       <div :if={@sent} class="dialog">
         <div class="bar">Request sent</div>
@@ -59,22 +55,4 @@ defmodule MeridianWeb.Me.AccessRequestHTML do
   end
 
   defp errors(field), do: Enum.map(field.errors, &translate_error/1)
-
-  # Meridian's mark: a globe, its night side under the meridian ring of a desk globe, tilted
-  # like the Earth (23.4°). The ring spans 140° around the tilted axis; the lit side faces away
-  # from it, with the terminator curving into the night. The earlier, symmetric mark is kept in
-  # docs/brand/mark-symmetric.svg.
-  defp mark(assigns) do
-    ~H"""
-    <svg class="mark" viewBox="0 0 16 16" width="88" height="88" aria-hidden="true">
-      <path class="ring" d="M2.62 2.92 A7.4 7.4 0 0 1 15.39 8.44 L13.59 8.33 A5.6 5.6 0 0 0 3.93 4.15 Z" />
-      <circle class="night" cx="8" cy="8" r="4.6" />
-      <path
-        class="day"
-        transform="rotate(113.4 8 8)"
-        d="M8 3.4 A4.6 4.6 0 0 1 8 12.6 A1.38 4.6 0 0 1 8 3.4 Z"
-      />
-    </svg>
-    """
-  end
 end

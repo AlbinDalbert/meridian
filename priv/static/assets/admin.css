@@ -1,4 +1,6 @@
-/* Styles for the admin console and /me. Deliberately small; no framework, no build step. */
+/* Styles for the admin console and /me. Deliberately small; no framework, no build step.
+   The console is green and follows the system's light or dark; /me (body.theme-me) is xebec's
+   amber, like the request page, so the two are never mixed up. */
 
 :root {
   --bg: #f7f7f5;
@@ -7,6 +9,7 @@
   --muted: #6b6b66;
   --border: #e2e2dd;
   --accent: #2f5d50;
+  --accent-strong: #5e9c87;
   --accent-text: #ffffff;
   --danger: #a3312a;
   --info-bg: #e7f0ec;
@@ -23,11 +26,28 @@
     --muted: #9a9a93;
     --border: #33332f;
     --accent: #6fae99;
+    --accent-strong: #a6d6c5;
     --accent-text: #0f1a16;
     --danger: #e0786f;
     --info-bg: #1f2e28;
     --error-bg: #3a2220;
   }
+}
+
+/* /me: xebec's Ember palette (see public.css), dark only. */
+body.theme-me {
+  --bg: #0c0b09;
+  --surface: #15130f;
+  --text: #e6dfd4;
+  --muted: #8f8678;
+  --border: #302b23;
+  --accent: #dfa13d;
+  --accent-strong: #f2c96f;
+  --accent-text: #0c0b09;
+  --danger: #e0786f;
+  --info-bg: rgba(223, 161, 61, 0.12);
+  --error-bg: #3a2220;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -51,7 +71,20 @@ code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size:
   background: var(--surface);
 }
 .topbar a { text-decoration: none; }
-.topbar .brand { font-weight: 600; color: var(--text); }
+.topbar .brand { display: flex; align-items: center; gap: 0.6rem; color: var(--accent); }
+.brand-word {
+  font-family: "JetBrains Mono", "Liberation Mono", ui-monospace, monospace;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+}
+.brand-area { color: var(--muted); font-size: 0.85rem; }
+
+/* The mark (MeridianWeb.BrandComponents), in this page's colors. */
+.mark { display: block; flex: none; }
+.mark .ring { fill: var(--accent); }
+.mark .night { fill: var(--border); }
+.mark .day { fill: var(--accent-strong); }
 .topbar .logout { margin-left: auto; }
 .topbar .topbar-user { margin-left: auto; }
 .topbar .topbar-user + .logout { margin-left: 0; }

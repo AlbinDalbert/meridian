@@ -3,6 +3,7 @@ defmodule MeridianWeb.Admin.SessionHTML do
 
   alias MeridianWeb.AdminAuth
 
+  # A front-door page like the request page (public.css), in the admin console's green.
   def new(assigns) do
     assigns =
       Map.merge(assigns, %{
@@ -11,26 +12,31 @@ defmodule MeridianWeb.Admin.SessionHTML do
       })
 
     ~H"""
-    <Layouts.app flash={@flash} signed_in={false}>
-      <div class="login">
-        <.header>
-          Admin
-          <:subtitle :if={@oidc_login}>Sign in with your organization's account.</:subtitle>
-          <:subtitle :if={!@oidc_login}>
-            Paste the deployment's <code>ADMIN_TOKEN</code> to continue.
-          </:subtitle>
-        </.header>
-        <%!-- A link, not a form: the CSP's form-action would block the redirect to the provider. --%>
-        <section :if={@oidc_login} class="card">
-          <a href={~p"/admin/auth/oidc"} class="btn btn-primary login-oidc">Sign in</a>
-        </section>
-        <details :if={@token_login && @oidc_login} class="login-token">
-          <summary class="muted">Use the admin token instead</summary>
-          <.token_form />
-        </details>
-        <.token_form :if={@token_login && !@oidc_login} autofocus />
+    <div class="scrim">
+      <.masthead sub="admin console" />
+      <div class="dialog">
+        <div class="bar">Operator sign-in</div>
+        <div class="content">
+          <%= if @oidc_login do %>
+            <p>Sign in with your organization's account.</p>
+            <%!-- A link, not a form: the CSP's form-action would block the redirect to the provider. --%>
+            <div class="actions">
+              <a href={~p"/admin/auth/oidc"} class="btn primary">Sign in</a>
+            </div>
+            <details :if={@token_login} class="token">
+              <summary>Use the admin token instead</summary>
+              <.token_form />
+            </details>
+          <% else %>
+            <p>Paste the deployment's <code>ADMIN_TOKEN</code> to continue.</p>
+            <.token_form autofocus />
+          <% end %>
+          <p :if={Phoenix.Flash.get(@flash, :error)} class="error">
+            ▲ {Phoenix.Flash.get(@flash, :error)}
+          </p>
+        </div>
       </div>
-    </Layouts.app>
+    </div>
     """
   end
 
@@ -38,18 +44,20 @@ defmodule MeridianWeb.Admin.SessionHTML do
 
   defp token_form(assigns) do
     ~H"""
-    <.form for={%{}} action={~p"/admin/login"} class="card">
-      <.input
+    <.form for={%{}} action={~p"/admin/login"}>
+      <input
         type="password"
         name="token"
         id="token"
-        value=""
-        label="Admin token"
+        placeholder="Admin token"
+        aria-label="Admin token"
         autocomplete="current-password"
         autofocus={@autofocus}
         required
       />
-      <.button>Log in</.button>
+      <div class="actions">
+        <button class="btn primary">Log in</button>
+      </div>
     </.form>
     """
   end

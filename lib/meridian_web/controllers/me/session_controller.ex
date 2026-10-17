@@ -15,6 +15,9 @@ defmodule MeridianWeb.Me.SessionController do
   alias Meridian.{Accounts, OIDC}
   alias MeridianWeb.MeAuth
 
+  # The sign-in page is a front-door page like the request page.
+  plug :put_root_layout, html: {MeridianWeb.Layouts, :public_root}
+
   @flow_cookie "_meridian_me_oidc"
   @flow_max_age 10 * 60
 

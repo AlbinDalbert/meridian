@@ -1,7 +1,7 @@
 defmodule MeridianWeb.Layouts do
   @moduledoc """
   Layouts for the admin console (`root/1`, `app/1`), the user area under `/me` (`me_root/1`,
-  `me/1`), and the public request page (`public_root/1`).
+  `me/1`), and the front-door pages: the request page and the admin login (`public_root/1`).
   """
   use MeridianWeb, :html
 
@@ -11,7 +11,8 @@ defmodule MeridianWeb.Layouts do
     |> Map.merge(%{
       title: assigns[:page_title] || "Admin",
       title_suffix: " · Meridian admin",
-      live_socket_path: "/admin/live"
+      live_socket_path: "/admin/live",
+      body_class: nil
     })
     |> document()
   end
@@ -22,14 +23,16 @@ defmodule MeridianWeb.Layouts do
     |> Map.merge(%{
       title: assigns[:page_title] || "Me",
       title_suffix: " · Meridian",
-      live_socket_path: "/me/live"
+      live_socket_path: "/me/live",
+      body_class: "theme-me"
     })
     |> document()
   end
 
   @doc """
-  The HTML document shell for public pages (the request page): no LiveView, and its own
-  stylesheet, in the look of xebec's login.
+  The HTML document shell for the front-door pages (the request page and the admin login): no
+  LiveView, and their own stylesheet, in the look of xebec's login. Amber by default; with
+  `theme: "admin"` assigned, in the admin console's green.
   """
   def public_root(assigns) do
     ~H"""
@@ -39,10 +42,12 @@ defmodule MeridianWeb.Layouts do
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="robots" content="noindex" />
-        <.live_title suffix=" · Meridian">{assigns[:page_title] || "Meridian"}</.live_title>
+        <.live_title suffix={if assigns[:theme] == "admin", do: " · Meridian admin", else: " · Meridian"}>
+          {assigns[:page_title] || "Meridian"}
+        </.live_title>
         <link rel="stylesheet" href={~p"/assets/public.css"} />
       </head>
-      <body>
+      <body class={assigns[:theme] && "theme-#{assigns[:theme]}"}>
         {@inner_content}
       </body>
     </html>
@@ -70,7 +75,7 @@ defmodule MeridianWeb.Layouts do
         <script defer src={~p"/assets/live.js"}>
         </script>
       </head>
-      <body>
+      <body class={@body_class}>
         {@inner_content}
       </body>
     </html>
@@ -85,7 +90,10 @@ defmodule MeridianWeb.Layouts do
   def app(assigns) do
     ~H"""
     <nav class="topbar">
-      <a href={~p"/admin/users"} class="brand">Meridian</a>
+      <a href={~p"/admin/users"} class="brand">
+        <.mark size={22} /><span class="brand-word">MERIDIAN</span>
+        <span class="brand-area">admin</span>
+      </a>
       <.link :if={@signed_in} navigate={~p"/admin/users"}>Users</.link>
       <.link :if={@signed_in} navigate={~p"/admin/requests"}>Requests</.link>
       <.link :if={@signed_in} navigate={~p"/admin/runs"}>Runs</.link>
@@ -108,7 +116,7 @@ defmodule MeridianWeb.Layouts do
   def me(assigns) do
     ~H"""
     <nav class="topbar">
-      <a href={~p"/me"} class="brand">Meridian</a>
+      <a href={~p"/me"} class="brand"><.mark size={22} /><span class="brand-word">MERIDIAN</span></a>
       <.link :if={@current_user} navigate={~p"/me"}>Personas</.link>
       <span :if={@current_user} class="muted topbar-user">{@current_user.email}</span>
       <.form
