@@ -3,15 +3,15 @@ defmodule MeridianWeb.V1.ChatCompletionControllerTest do
 
   import Meridian.Fixtures
 
-  alias Meridian.Personas
+  alias Meridian.Agents
 
   setup %{conn: conn} do
     user = user_fixture(%{}, %{"model" => "qwen"})
 
     {:ok, _} =
       user
-      |> Personas.get_default_persona()
-      |> Personas.update_persona(%{
+      |> Agents.get_default_agent()
+      |> Agents.update_agent(%{
         "system_prompt" => "Be brief.",
         "params" => %{"temperature" => 0.3}
       })
@@ -22,7 +22,7 @@ defmodule MeridianWeb.V1.ChatCompletionControllerTest do
     %{conn: conn, user: user}
   end
 
-  test "proxies a non-streaming request with the persona applied", %{conn: conn} do
+  test "proxies a non-streaming request with the agent applied", %{conn: conn} do
     test_pid = self()
 
     Req.Test.stub(Meridian.Upstream, fn conn ->
@@ -111,7 +111,7 @@ defmodule MeridianWeb.V1.ChatCompletionControllerTest do
     assert %{"error" => %{"code" => "upstream_unavailable"}} = json_response(conn, 502)
   end
 
-  test "returns 404 for unknown personas", %{conn: conn} do
+  test "returns 404 for unknown agents", %{conn: conn} do
     conn = post(conn, ~p"/v1/chat/completions", %{"model" => "meridian/nope", "messages" => []})
 
     assert %{"error" => %{"code" => "model_not_found", "type" => "invalid_request_error"}} =

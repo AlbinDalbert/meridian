@@ -4,7 +4,7 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
   import Phoenix.LiveViewTest
   import Meridian.Fixtures
 
-  alias Meridian.{Accounts, Personas}
+  alias Meridian.{Accounts, Agents}
 
   setup :log_in_admin
 
@@ -12,15 +12,15 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
     assert {:error, {:redirect, %{to: "/admin/login"}}} = live(build_conn(), ~p"/admin/users")
   end
 
-  test "creating a user creates their default persona", %{conn: conn} do
+  test "creating a user creates their default agent", %{conn: conn} do
     stub_upstream_models(["qwen", "llama"])
     {:ok, lv, html} = live(conn, ~p"/admin/users/new")
-    assert html =~ "Default persona"
+    assert html =~ "Default agent"
 
     assert lv
            |> form("#user-form",
              user: %{name: "Ada", email: "ada@example.com"},
-             persona: %{model: "nope"}
+             agent: %{model: "nope"}
            )
            |> render_submit() =~ "is not offered by the upstream"
 
@@ -28,7 +28,7 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
       lv
       |> form("#user-form",
         user: %{name: "Ada", email: "ada@example.com"},
-        persona: %{model: "qwen"}
+        agent: %{model: "qwen"}
       )
       |> render_submit()
       |> follow_redirect(conn)
@@ -36,7 +36,7 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
     assert html =~ "User created."
     assert html =~ "meridian/default"
     assert [%{name: "Ada"} = user] = Accounts.list_users()
-    assert %{model: "qwen"} = Personas.get_default_persona(user)
+    assert %{model: "qwen"} = Agents.get_default_agent(user)
   end
 
   test "minting a key shows the token once", %{conn: conn} do
@@ -45,11 +45,11 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
 
     html =
       lv
-      |> form("#api-key-form", api_key: %{name: "laptop", policy: %{default_persona: "default"}})
+      |> form("#api-key-form", api_key: %{name: "laptop", policy: %{default_agent: "default"}})
       |> render_submit()
 
     assert [api_key] = Accounts.list_api_keys(user)
-    assert %{name: "laptop", policy: %{default_persona: "default"}} = api_key
+    assert %{name: "laptop", policy: %{default_agent: "default"}} = api_key
 
     token =
       lv |> element("#minted-token") |> render() |> LazyHTML.from_fragment() |> LazyHTML.text()
@@ -80,67 +80,67 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
     assert %{oidc_subject: nil, oidc_issuer: nil} = Accounts.get_user!(user.id)
   end
 
-  test "creating and editing a persona", %{conn: conn} do
+  test "creating and editing an agent", %{conn: conn} do
     user = user_fixture()
     stub_upstream_down()
-    {:ok, lv, _html} = live(conn, ~p"/admin/users/#{user}/personas/new")
+    {:ok, lv, _html} = live(conn, ~p"/admin/users/#{user}/agents/new")
 
     attrs = %{slug: "coder", name: "Coder", model: "qwen", params: ~s({"temperature": 0.2})}
 
-    assert lv |> form("#persona-form", persona: attrs) |> render_submit() =~
+    assert lv |> form("#agent-form", agent: attrs) |> render_submit() =~
              "upstream unreachable"
 
     assert lv
-           |> form("#persona-form", persona: %{attrs | params: "nope"}, force: "true")
+           |> form("#agent-form", agent: %{attrs | params: "nope"}, force: "true")
            |> render_submit() =~
              "is invalid"
 
     {:ok, _lv, html} =
       lv
-      |> form("#persona-form", persona: attrs, force: "true")
+      |> form("#agent-form", agent: attrs, force: "true")
       |> render_submit()
       |> follow_redirect(conn)
 
     assert html =~ "meridian/coder"
-    persona = Personas.get_persona_by_slug(user, "coder")
-    assert persona.params == %{"temperature" => 0.2}
+    agent = Agents.get_agent_by_slug(user, "coder")
+    assert agent.params == %{"temperature" => 0.2}
 
-    {:ok, lv, html} = live(conn, ~p"/admin/personas/#{persona}/edit")
+    {:ok, lv, html} = live(conn, ~p"/admin/agents/#{agent}/edit")
     assert html =~ "temperature"
 
     {:ok, _lv, _html} =
       lv
-      |> form("#persona-form", persona: %{system_prompt: "Be terse."})
+      |> form("#agent-form", agent: %{system_prompt: "Be terse."})
       |> render_submit()
       |> follow_redirect(conn)
 
-    assert Personas.get_persona!(persona.id).system_prompt == "Be terse."
+    assert Agents.get_agent!(agent.id).system_prompt == "Be terse."
   end
 
   test "default params and model validation are folded into an advanced section", %{conn: conn} do
     user = user_fixture()
     stub_upstream_models(["upstream-model"])
-    persona = Personas.get_default_persona(user)
-    {:ok, lv, _html} = live(conn, ~p"/admin/personas/#{persona}/edit")
+    agent = Agents.get_default_agent(user)
+    {:ok, lv, _html} = live(conn, ~p"/admin/agents/#{agent}/edit")
 
-    assert has_element?(lv, "#persona-advanced:not([open]) #persona_params")
-    assert has_element?(lv, "#persona-advanced #force")
+    assert has_element?(lv, "#agent-advanced:not([open]) #agent_params")
+    assert has_element?(lv, "#agent-advanced #force")
 
-    lv |> element("#persona-advanced summary") |> render_click()
-    assert has_element?(lv, "#persona-advanced[open]")
-    lv |> element("#persona-advanced summary") |> render_click()
-    refute has_element?(lv, "#persona-advanced[open]")
+    lv |> element("#agent-advanced summary") |> render_click()
+    assert has_element?(lv, "#agent-advanced[open]")
+    lv |> element("#agent-advanced summary") |> render_click()
+    refute has_element?(lv, "#agent-advanced[open]")
 
     # An invalid param opens it, so the error can be seen.
-    assert lv |> form("#persona-form", persona: %{params: "nope"}) |> render_change() =~
+    assert lv |> form("#agent-form", agent: %{params: "nope"}) |> render_change() =~
              "is invalid"
 
-    assert has_element?(lv, "#persona-advanced[open]")
+    assert has_element?(lv, "#agent-advanced[open]")
 
     # Once params are set, the summary says so.
-    {:ok, _} = Personas.update_persona(persona, %{"params" => %{"temperature" => 0.2}})
-    {:ok, lv, _html} = live(conn, ~p"/admin/personas/#{persona}/edit")
-    assert lv |> element("#persona-advanced summary") |> render() =~ "1 default param<"
+    {:ok, _} = Agents.update_agent(agent, %{"params" => %{"temperature" => 0.2}})
+    {:ok, lv, _html} = live(conn, ~p"/admin/agents/#{agent}/edit")
+    assert lv |> element("#agent-advanced summary") |> render() =~ "1 default param<"
   end
 
   @clock """
@@ -153,18 +153,18 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
   }
   """
 
-  test "enabling and configuring extensions on a persona", %{conn: conn} do
+  test "enabling and configuring extensions on an agent", %{conn: conn} do
     user = user_fixture()
     stub_upstream_models(["upstream-model"])
-    persona = Personas.get_default_persona(user)
+    agent = Agents.get_default_agent(user)
     clock = extension_fixture(nil, @clock, %{"name" => "clock"})
     own = extension_fixture(user, "return {}", %{"name" => "theirs"})
     other = extension_fixture(user_fixture(), "return {}", %{"name" => "someone-elses"})
     gone = Ecto.UUID.generate()
 
-    {:ok, _persona} = Personas.update_persona(persona, %{"extensions" => %{gone => %{"x" => 1}}})
+    {:ok, _agent} = Agents.update_agent(agent, %{"extensions" => %{gone => %{"x" => 1}}})
 
-    {:ok, lv, html} = live(conn, ~p"/admin/personas/#{persona}/edit")
+    {:ok, lv, html} = live(conn, ~p"/admin/agents/#{agent}/edit")
     assert html =~ "Settings for 1 extension that&#39;s gone (kept, but ignored)."
     assert html =~ "theirs (own)"
     refute html =~ other.name
@@ -172,20 +172,20 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
 
     # Switching an extension on shows its settings, with the defaults filled in.
     lv
-    |> form("#persona-form", extensions: %{clock.id => %{enabled: "true"}})
+    |> form("#agent-form", extensions: %{clock.id => %{enabled: "true"}})
     |> render_change()
 
     assert lv |> element("#extension-#{clock.id}-settings") |> render() =~ "Etc/UTC"
 
     assert lv
-           |> form("#persona-form",
+           |> form("#agent-form",
              extensions: %{clock.id => %{enabled: "true", settings: ~s({"timezone": "Nowhere"})}}
            )
            |> render_submit() =~ "clock: unknown timezone"
 
     {:ok, _lv, _html} =
       lv
-      |> form("#persona-form",
+      |> form("#agent-form",
         extensions: %{
           clock.id => %{enabled: "true", settings: ~s({"timezone": "Europe/Stockholm"})},
           own.id => %{enabled: "true"}
@@ -194,7 +194,7 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
       |> render_submit()
       |> follow_redirect(conn)
 
-    assert Personas.get_persona!(persona.id).extensions == %{
+    assert Agents.get_agent!(agent.id).extensions == %{
              clock.id => %{"timezone" => "Europe/Stockholm"},
              own.id => %{},
              gone => %{"x" => 1}
@@ -234,14 +234,14 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
       assert skill.user_id == nil
 
       {:ok, lv, _html} = live(conn, ~p"/admin/skills")
-      assert lv |> element("#skills tr", "db-fetching") |> render() =~ "0 personas"
+      assert lv |> element("#skills tr", "db-fetching") |> render() =~ "0 agents"
       assert lv |> element(".sidebar a.active", "Skills") |> has_element?()
     end
 
-    test "the persona form warns about a skill's missing extensions", %{conn: conn} do
+    test "the agent form warns about a skill's missing extensions", %{conn: conn} do
       user = user_fixture()
       stub_upstream_models(["upstream-model"])
-      persona = Personas.get_default_persona(user)
+      agent = Agents.get_default_agent(user)
       curl = extension_fixture(nil, "return {}", %{"name" => "curl"})
 
       {:ok, skill} =
@@ -252,16 +252,16 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
           "recommended_extensions" => [curl.id]
         })
 
-      {:ok, lv, _html} = live(conn, ~p"/admin/personas/#{persona}/edit")
+      {:ok, lv, _html} = live(conn, ~p"/admin/agents/#{agent}/edit")
       refute has_element?(lv, "#skill-#{skill.id}-warning")
 
-      lv |> form("#persona-form", skills: %{skill.id => "true"}) |> render_change()
+      lv |> form("#agent-form", skills: %{skill.id => "true"}) |> render_change()
 
       assert lv |> element("#skill-#{skill.id}-warning") |> render() =~
-               "Works best with curl, which isn&#39;t on for this persona."
+               "Works best with curl, which isn&#39;t on for this agent."
 
       lv
-      |> form("#persona-form",
+      |> form("#agent-form",
         skills: %{skill.id => "true"},
         extensions: %{curl.id => %{enabled: "true"}}
       )
@@ -272,41 +272,41 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
       # The warning doesn't stop saving.
       {:ok, _lv, _html} =
         lv
-        |> form("#persona-form",
+        |> form("#agent-form",
           skills: %{skill.id => "true"},
           extensions: %{curl.id => %{enabled: "false"}}
         )
         |> render_submit()
         |> follow_redirect(conn)
 
-      assert Personas.get_persona!(persona.id).skills == [skill.id]
+      assert Agents.get_agent!(agent.id).skills == [skill.id]
     end
   end
 
-  test "making a persona the default and deleting personas", %{conn: conn} do
+  test "making an agent the default and deleting agents", %{conn: conn} do
     user = user_fixture()
-    persona = persona_fixture(user, %{"slug" => "coder"})
+    agent = agent_fixture(user, %{"slug" => "coder"})
     {:ok, lv, _html} = live(conn, ~p"/admin/users/#{user}")
 
-    lv |> element("#personas button", "Make default") |> render_click()
-    assert Personas.get_default_persona(user).id == persona.id
+    lv |> element("#agents button", "Make default") |> render_click()
+    assert Agents.get_default_agent(user).id == agent.id
 
-    lv |> element("#personas button", "Delete") |> render_click()
-    assert Personas.get_persona_by_slug(user, "default") == nil
+    lv |> element("#agents button", "Delete") |> render_click()
+    assert Agents.get_agent_by_slug(user, "default") == nil
   end
 
-  test "the crew page lists every user's personas", %{conn: conn} do
+  test "the agents page lists every user's agents", %{conn: conn} do
     ada = user_fixture(%{"name" => "Ada"})
     clock = extension_fixture(nil, "return {}", %{"name" => "clock"})
-    persona_fixture(ada, %{"slug" => "coder", "extensions" => %{clock.id => %{}}})
-    persona_fixture(user_fixture(%{"name" => "Bob"}), %{"slug" => "writer"})
+    agent_fixture(ada, %{"slug" => "coder", "extensions" => %{clock.id => %{}}})
+    agent_fixture(user_fixture(%{"name" => "Bob"}), %{"slug" => "writer"})
 
-    {:ok, lv, html} = live(conn, ~p"/admin/crew")
+    {:ok, lv, html} = live(conn, ~p"/admin/agents")
     assert html =~ "meridian/coder"
     assert html =~ "meridian/writer"
-    assert lv |> element("#crew a", "Ada") |> has_element?()
-    assert lv |> element(".sidebar a.active", "Crew") |> has_element?()
-    assert lv |> element("#crew tr", "meridian/coder") |> render() =~ "clock"
+    assert lv |> element("#agents a", "Ada") |> has_element?()
+    assert lv |> element(".sidebar a.active", "Agents") |> has_element?()
+    assert lv |> element("#agents tr", "meridian/coder") |> render() =~ "clock"
   end
 
   test "the extensions page lists every extension", %{conn: conn} do
@@ -314,14 +314,14 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
     clock = extension_fixture(nil, @clock, %{"name" => "clock"})
     extension_fixture(nil, "return {}", %{"name" => "unused"})
     extension_fixture(user, "return {}", %{"name" => "adas"})
-    persona_fixture(user, %{"extensions" => %{clock.id => %{}}})
-    persona_fixture(user, %{"extensions" => %{clock.id => %{}}})
+    agent_fixture(user, %{"extensions" => %{clock.id => %{}}})
+    agent_fixture(user, %{"extensions" => %{clock.id => %{}}})
 
     {:ok, lv, _html} = live(conn, ~p"/admin/extensions")
-    assert lv |> element("#extensions tr", "clock") |> render() =~ "2 personas"
+    assert lv |> element("#extensions tr", "clock") |> render() =~ "2 agents"
     assert lv |> element("#extensions tr", "clock") |> render() =~ "Tells the time."
     assert lv |> element("#extensions tr", "clock") |> render() =~ "global"
-    assert lv |> element("#extensions tr", "unused") |> render() =~ "0 personas"
+    assert lv |> element("#extensions tr", "unused") |> render() =~ "0 agents"
     assert lv |> element("#extensions tr", "adas") |> render() =~ "Ada"
   end
 

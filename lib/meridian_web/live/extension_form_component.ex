@@ -57,7 +57,7 @@ defmodule MeridianWeb.ExtensionFormComponent do
         <.input
           field={@form[:name]}
           label="Name"
-          hint="Lowercase letters, digits, '-' and '_'. Shown in lists and in persona forms."
+          hint="Lowercase letters, digits, '-' and '_'. Shown in lists and in agent forms."
           required
         />
         <MeridianWeb.ExtensionComponents.code_editor
@@ -87,7 +87,7 @@ defmodule MeridianWeb.ExtensionFormComponent do
             class="link danger push-right"
             phx-click="delete"
             phx-target={@myself}
-            data-confirm={"Delete #{@extension.name}? Personas that use it keep their settings, but it stops running."}
+            data-confirm={"Delete #{@extension.name}? Agents that use it keep their settings, but it stops running."}
           >
             Delete
           </button>

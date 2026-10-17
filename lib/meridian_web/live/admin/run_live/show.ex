@@ -1,7 +1,7 @@
 defmodule MeridianWeb.Admin.RunLive.Show do
   @moduledoc """
   A run's details and its event log, live. For seeing that runs work and what they cost, not
-  what was said: there is no persona, no message, and no reply here, and events are shown by
+  what was said: there is no agent, no message, and no reply here, and events are shown by
   type and time only, since their payloads carry the conversation (text deltas, tool calls,
   what extensions recalled).
 

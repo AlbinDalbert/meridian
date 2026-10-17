@@ -4,8 +4,8 @@ defmodule Meridian.Skills do
 
   A skill is a row: a name, a description, and a prompt. Global skills (made in the admin
   console) can be used by everyone; a user's own skills (made in `/me`) only by that user.
-  Personas enable skills by id (`personas.skills`); ids of skills that are gone, or that the
-  persona's user can't use, are kept but ignored.
+  Agents enable skills by id (`agents.skills`); ids of skills that are gone, or that the
+  agent's user can't use, are kept but ignored.
 
   In a run, the enabled skills reach the model in two parts (progressive disclosure): an index
   in the system prompt (each skill's name and description, `prompt_section/1`), and a
@@ -13,13 +13,13 @@ defmodule Meridian.Skills do
   description until the model decides it needs the rest.
 
   A skill can recommend extensions it works best with (`recommended_extensions`). That's only a
-  hint, shown when a persona has the skill without them (`missing_extensions/2`); nothing
+  hint, shown when an agent has the skill without them (`missing_extensions/2`); nothing
   depends on it.
   """
   import Ecto.Query
 
   alias Meridian.Accounts.User
-  alias Meridian.Personas.Persona
+  alias Meridian.Agents.Agent
   alias Meridian.Repo
   alias Meridian.Skills.Skill
 
@@ -67,14 +67,14 @@ defmodule Meridian.Skills do
 
   def delete_skill(%Skill{} = skill), do: Repo.delete(skill)
 
-  ## Personas
+  ## Agents
 
   @doc """
-  The skills `persona` enables that its user can use, by name. If a user's own skill has the
+  The skills `agent` enables that its user can use, by name. If a user's own skill has the
   same name as a global one, the user's own wins.
   """
-  @spec enabled(Persona.t()) :: [Skill.t()]
-  def enabled(%Persona{skills: [_ | _] = ids, user_id: user_id}) do
+  @spec enabled(Agent.t()) :: [Skill.t()]
+  def enabled(%Agent{skills: [_ | _] = ids, user_id: user_id}) do
     ids = Enum.filter(ids, &match?({:ok, _}, Ecto.UUID.cast(&1)))
 
     from(s in available(user_id), where: s.id in ^ids, order_by: [asc: s.name])
@@ -84,7 +84,7 @@ defmodule Meridian.Skills do
     |> Enum.sort_by(& &1.name)
   end
 
-  def enabled(_persona), do: []
+  def enabled(_agent), do: []
 
   @doc """
   The extensions `skill` recommends that aren't among `enabled_extension_ids`, as

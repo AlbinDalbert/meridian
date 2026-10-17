@@ -9,7 +9,7 @@ defmodule MeridianWeb.Me.SessionHTML do
       <div class="dialog">
         <div class="bar">Sign in</div>
         <div class="content">
-          <p>Sign in to manage your crew.</p>
+          <p>Sign in to manage your agents.</p>
           <%!-- A link, not a form: the CSP's form-action would block the redirect to the provider. --%>
           <div class="actions">
             <a href={~p"/me/auth/oidc"} class="btn primary">Sign in</a>

@@ -14,7 +14,7 @@ defmodule MeridianWeb.Admin.UserLive.Index do
     <Layouts.app flash={@flash} current_path={@current_path}>
       <.header>
         Users
-        <:subtitle>Users own a crew and API keys. Clients act as a user via one of their keys.</:subtitle>
+        <:subtitle>Users own agents and API keys. Clients act as a user via one of their keys.</:subtitle>
         <:actions>
           <.link navigate={~p"/admin/users/new"} class="btn btn-primary">New user</.link>
         </:actions>

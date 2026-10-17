@@ -47,7 +47,7 @@ defmodule MeridianWeb.Me.SessionControllerTest do
     assert conn |> get(~p"/me/login") |> html_response(200) =~ ~s(href="/me/auth/oidc")
   end
 
-  test "signing in links the user and shows their personas", %{conn: conn, user: user} do
+  test "signing in links the user and shows their agents", %{conn: conn, user: user} do
     {conn, query} = start_sign_in(conn)
     assert query["client_id"] == "me_client"
     assert query["redirect_uri"] == url(~p"/me/auth/callback")
@@ -66,7 +66,7 @@ defmodule MeridianWeb.Me.SessionControllerTest do
 
     conn = recycle(conn)
     html = conn |> get(~p"/me") |> html_response(200)
-    assert html =~ "Your crew"
+    assert html =~ "Your agents"
     assert html =~ "meridian/default"
     assert get(conn, ~p"/me/login") |> redirected_to() == ~p"/me"
 

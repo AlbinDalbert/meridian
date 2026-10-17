@@ -3,11 +3,11 @@ defmodule Meridian.AccountsTest do
 
   import Meridian.Fixtures
 
-  alias Meridian.{Accounts, Personas}
+  alias Meridian.{Accounts, Agents}
   alias Meridian.Accounts.ApiKey
 
   describe "create_user/3" do
-    test "creates the user with a default persona" do
+    test "creates the user with a default agent" do
       assert {:ok, user} =
                Accounts.create_user(
                  %{"name" => "Ada", "email" => "ada@example.com"},
@@ -15,14 +15,14 @@ defmodule Meridian.AccountsTest do
                  force: true
                )
 
-      assert [persona] = Personas.list_personas(user)
-      assert %{slug: "default", model: "m1", is_default: true} = persona
+      assert [agent] = Agents.list_agents(user)
+      assert %{slug: "default", model: "m1", is_default: true} = agent
     end
 
-    test "validates the default persona's model against the upstream" do
+    test "validates the default agent's model against the upstream" do
       stub_upstream_models(["m1"])
 
-      assert {:error, :persona, changeset} =
+      assert {:error, :agent, changeset} =
                Accounts.create_user(%{"name" => "Ada", "email" => "ada@example.com"}, %{
                  "model" => "nope"
                })
@@ -68,12 +68,12 @@ defmodule Meridian.AccountsTest do
     end
   end
 
-  test "delete_user/1 removes the user's keys and personas" do
+  test "delete_user/1 removes the user's keys and agents" do
     user = user_fixture()
     api_key = api_key_fixture(user)
 
     assert {:ok, _} = Accounts.delete_user(user)
-    assert Personas.list_personas(user) == []
+    assert Agents.list_agents(user) == []
     assert Accounts.authenticate_api_key(api_key.token) == :error
   end
 
@@ -111,30 +111,30 @@ defmodule Meridian.AccountsTest do
       assert Accounts.authenticate_api_key(api_key.token) == :error
     end
 
-    test "policy defaults to all personas" do
+    test "policy defaults to all agents" do
       api_key = api_key_fixture(user_fixture())
-      assert %{default_persona: nil, allowed_personas: []} = api_key.policy
+      assert %{default_agent: nil, allowed_agents: []} = api_key.policy
     end
 
-    test "policy default persona must be allowed" do
+    test "policy default agent must be allowed" do
       user = user_fixture()
 
       assert {:error, changeset} =
                Accounts.mint_api_key(user, %{
                  "name" => "k",
-                 "policy" => %{"default_persona" => "a", "allowed_personas" => ["b", ""]}
+                 "policy" => %{"default_agent" => "a", "allowed_agents" => ["b", ""]}
                })
 
-      assert %{policy: %{default_persona: ["must be one of the allowed personas"]}} =
+      assert %{policy: %{default_agent: ["must be one of the allowed agents"]}} =
                errors_on(changeset)
 
       assert {:ok, api_key} =
                Accounts.mint_api_key(user, %{
                  "name" => "k",
-                 "policy" => %{"default_persona" => "b", "allowed_personas" => ["b", ""]}
+                 "policy" => %{"default_agent" => "b", "allowed_agents" => ["b", ""]}
                })
 
-      assert %{default_persona: "b", allowed_personas: ["b"]} = api_key.policy
+      assert %{default_agent: "b", allowed_agents: ["b"]} = api_key.policy
     end
   end
 end

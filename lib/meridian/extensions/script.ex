@@ -6,7 +6,7 @@ defmodule Meridian.Extensions.Script do
 
       local M = {
         description = "Adds the date to the system prompt.",
-        settings = { timezone = "Etc/UTC" },   -- defaults; personas override them
+        settings = { timezone = "Etc/UTC" },   -- defaults; agents override them
       }
 
       function M.validate(settings)            -- optional: return an error message, or nothing

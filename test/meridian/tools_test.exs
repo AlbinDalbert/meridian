@@ -6,7 +6,7 @@ defmodule Meridian.ToolsTest do
 
   @moduletag :capture_log
 
-  alias Meridian.{Extensions, Personas, Runs, Threads}
+  alias Meridian.{Extensions, Agents, Runs, Threads}
   alias Meridian.Runs.Worker
   alias Meridian.Threads.Message
 
@@ -39,10 +39,10 @@ defmodule Meridian.ToolsTest do
 
   setup do
     user = user_fixture(%{}, %{"model" => "qwen"})
-    persona = Personas.get_default_persona(user)
+    agent = Agents.get_default_agent(user)
     weather = extension_fixture(nil, @weather)
-    {:ok, persona} = Personas.update_persona(persona, %{"extensions" => %{weather.id => %{}}})
-    %{user: user, persona: persona, weather: weather, tool: weather.name <> "__get_weather"}
+    {:ok, agent} = Agents.update_agent(agent, %{"extensions" => %{weather.id => %{}}})
+    %{user: user, agent: agent, weather: weather, tool: weather.name <> "__get_weather"}
   end
 
   # Sends "Hi" on a new thread and runs it, the upstream answering with `responses` in turn.
@@ -130,12 +130,12 @@ defmodule Meridian.ToolsTest do
           %{"name" => long}
         )
 
-      {:ok, persona} =
+      {:ok, agent} =
         user
-        |> Personas.get_default_persona()
-        |> Personas.update_persona(%{"extensions" => %{global.id => %{}, own.id => %{}}})
+        |> Agents.get_default_agent()
+        |> Agents.update_agent(%{"extensions" => %{global.id => %{}, own.id => %{}}})
 
-      names = persona |> Extensions.enabled() |> Extensions.tool_set() |> Enum.map(& &1.name)
+      names = agent |> Extensions.enabled() |> Extensions.tool_set() |> Enum.map(& &1.name)
       assert length(Enum.uniq(names)) == 2
       assert Enum.all?(names, &Regex.match?(~r/^[a-zA-Z0-9_-]{1,64}$/, &1))
     end
@@ -250,12 +250,12 @@ defmodule Meridian.ToolsTest do
 
     test "settings reach tools, and before_run can drop them", %{
       user: user,
-      persona: persona,
+      agent: agent,
       weather: weather,
       tool: tool
     } do
       {:ok, _} =
-        Personas.update_persona(persona, %{
+        Agents.update_agent(agent, %{
           "extensions" => %{weather.id => %{"units" => "imperial"}}
         })
 
@@ -268,7 +268,7 @@ defmodule Meridian.ToolsTest do
       assert tool_results(second) == [{"c1", "Oslo: rain (imperial)"}]
 
       {:ok, _} =
-        Personas.update_persona(persona, %{"extensions" => %{weather.id => %{"offer" => false}}})
+        Agents.update_agent(agent, %{"extensions" => %{weather.id => %{"offer" => false}}})
 
       run_message(user, [completion_events(["ok"])])
       assert [request] = requests()
@@ -276,7 +276,7 @@ defmodule Meridian.ToolsTest do
     end
 
     test "tool_call can rewrite or block calls, tool_result can change results",
-         %{user: user, persona: persona, weather: weather, tool: tool} do
+         %{user: user, agent: agent, weather: weather, tool: tool} do
       guard =
         extension_fixture(nil, """
         local M = {}
@@ -296,7 +296,7 @@ defmodule Meridian.ToolsTest do
         """)
 
       {:ok, _} =
-        Personas.update_persona(persona, %{
+        Agents.update_agent(agent, %{
           "extensions" => %{weather.id => %{}, guard.id => %{}}
         })
 
@@ -318,14 +318,14 @@ defmodule Meridian.ToolsTest do
 
     test "a failing tool_call handler blocks the call", %{
       user: user,
-      persona: persona,
+      agent: agent,
       weather: weather,
       tool: tool
     } do
       guard = extension_fixture(nil, "return { tool_call = function() error('broken') end }")
 
       {:ok, _} =
-        Personas.update_persona(persona, %{
+        Agents.update_agent(agent, %{
           "extensions" => %{weather.id => %{}, guard.id => %{}}
         })
 
@@ -342,7 +342,7 @@ defmodule Meridian.ToolsTest do
 
     test "step_end fires after every step", %{
       user: user,
-      persona: persona,
+      agent: agent,
       weather: weather,
       tool: tool
     } do
@@ -352,7 +352,7 @@ defmodule Meridian.ToolsTest do
         """)
 
       {:ok, _} =
-        Personas.update_persona(persona, %{
+        Agents.update_agent(agent, %{
           "extensions" => %{weather.id => %{}, observer.id => %{}}
         })
 
@@ -389,7 +389,7 @@ defmodule Meridian.ToolsTest do
       assert length(requests()) == 10
     end
 
-    test "cancelling stops a running tool call", %{user: user, persona: persona} do
+    test "cancelling stops a running tool call", %{user: user, agent: agent} do
       # A tool that waits on the model, which never answers.
       slow =
         extension_fixture(nil, """
@@ -397,7 +397,7 @@ defmodule Meridian.ToolsTest do
           run = function() return meridian.model.complete({ messages = {} }) end } } }
         """)
 
-      {:ok, _} = Personas.update_persona(persona, %{"extensions" => %{slow.id => %{}}})
+      {:ok, _} = Agents.update_agent(agent, %{"extensions" => %{slow.id => %{}}})
       wait = slow.name <> "__wait"
       thread = thread_fixture(user)
       {_message, run} = message_fixture(thread, "Hi")

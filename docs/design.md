@@ -7,12 +7,12 @@
 > whichever one is wrong, deliberately.
 
 Meridian is a self-hostable **agent layer** that sits between clients and any OpenAI-compatible
-inference endpoint. It owns identity, conversations, personas, and the agent run lifecycle, and
+inference endpoint. It owns identity, conversations, agents, and the agent run lifecycle, and
 it is built to be **extended**. The inference backend is treated as a dumb, stateless model
 endpoint.
 
 From a client's point of view Meridian looks like an inference endpoint. The difference is that
-**your API key carries *you***: your personas, your threads, and whatever your extensions add
+**your API key carries *you***: your agents, your threads, and whatever your extensions add
 (memory, tools, skills, ...).
 
 ## Goals
@@ -20,7 +20,7 @@ From a client's point of view Meridian looks like an inference endpoint. The dif
 - **Durable conversations.** A response being generated must not depend on the client staying
   connected. Generation happens server-side; clients subscribe to it and can leave and come back.
 - **Works with generic clients.** Any client that speaks the OpenAI Chat Completions API can use
-  Meridian and get personas for free.
+  Meridian and get agents for free.
 - **A richer native API** for first-party clients: server-side threads, durable runs, resumable
   event streams (SSE and WebSocket), multi-device.
 - **Extensible by design.** The core is a small run lifecycle with hooks. Memory, tools, skills,
@@ -96,17 +96,17 @@ flowchart LR
 
 ### 1. Stateless: `/v1/*` (OpenAI-compatible)
 
-Deliberately dead simple: **a persona-aware proxy**. The client owns the conversation history
+Deliberately dead simple: **an agent-aware proxy**. The client owns the conversation history
 and the tool loop, exactly as with any OpenAI endpoint.
 
-- `GET /v1/models`: lists **personas** as models (e.g. `meridian/default`, `meridian/coder`).
+- `GET /v1/models`: lists **agents** as models (e.g. `meridian/default`, `meridian/coder`).
   Optionally also passes through raw upstream models (`EXPOSE_UPSTREAM_MODELS`).
 - `POST /v1/chat/completions`: streaming and non-streaming.
 
 Request handling:
 
-1. Authenticate the key; resolve the persona from `model` (subject to key policy).
-2. Prepend/append the persona's system prompt, apply its upstream model and default params.
+1. Authenticate the key; resolve the agent from `model` (subject to key policy).
+2. Prepend/append the agent's system prompt, apply its upstream model and default params.
 3. Forward to upstream unchanged otherwise. Client tools pass through untouched.
 4. Stream the response back. A client disconnect cancels the upstream request.
 
@@ -123,21 +123,21 @@ REST:
 | Method & path                         | Purpose |
 |---------------------------------------|---------|
 | `GET/POST /api/threads`               | List / create threads |
-| `GET/PATCH/DELETE /api/threads/:id`   | Read / update (title, persona, settings) / delete |
+| `GET/PATCH/DELETE /api/threads/:id`   | Read / update (title, agent, settings) / delete |
 | `GET /api/threads/:id/messages`       | Paginated history |
 | `POST /api/threads/:id/messages`      | Add a user message → returns `{message, run}` immediately |
 | `GET /api/runs/:id`                   | Run status + usage |
 | `GET /api/runs/:id/events`            | **SSE** event stream, resumable via `Last-Event-ID` / `?after=seq` |
 | `POST /api/runs/:id/cancel`           | Cancel a run |
 | `GET /api/threads/:id/events`         | SSE stream of all run events for a thread |
-| `GET/POST/PATCH/DELETE /api/personas` | Manage personas |
-| `GET /api/models`                     | Upstream models (cached), for building personas |
+| `GET/POST/PATCH/DELETE /api/agents` | Manage agents |
+| `GET /api/models`                     | Upstream models (cached), for building agents |
 | `GET/POST/DELETE /api/keys`           | Mint / revoke API keys for yourself |
 | `/api/ext/:extension/*`               | Routes mounted by extensions |
 
 `POST /api/threads/:id/messages` accepts `if_busy: "queue" | "interrupt" | "reject"` for when the
 thread already has an active run (default: `reject` with `409`). *Slice 2 implements only
-`reject`; `GET /api/threads/:id/events`, personas, models, keys, and extension routes are not
+`reject`; `GET /api/threads/:id/events`, agents, models, keys, and extension routes are not
 built yet.*
 
 WebSocket (Phoenix Channels at `/socket`, authenticated with an API key). *Not planned yet: no
@@ -169,21 +169,17 @@ A small **LiveView** app mounted at `/admin`, inside the same release. It is an 
 not a chat client.
 
 Navigation is a sidebar in two groups. **Operate** is the console's own: users, access
-requests, runs. **Configure** is the group `/me` has too: the crew (every user's personas, at
-`/admin/crew`), skills, MCPs, and extensions (every extension, global and users' own, how many
-personas enable each, and the script editor). The pages behind an entry differ between the two areas, but the entries match, so the
+requests, runs. **Configure** is the group `/me` has too: agents (every user's agents, at
+`/admin/agents`), skills, MCPs, and extensions (every extension, global and users' own, how many
+agents enable each, and the script editor). The pages behind an entry differ between the two areas, but the entries match, so the
 console reads as `/me` plus operating. MCPs are listed as "soon" until they exist.
 
-**Crew** is what the UI calls a set of personas (a user's personas, the personas a key allows),
-however many there are, zero and one included. A single persona is still a persona. The code
-and the APIs keep `persona`/`personas`.
-
-- **Manage**: users, API keys (mint / revoke), personas.
+- **Manage**: users, API keys (mint / revoke), agents.
 - **Observe**: how Meridian is used, **never what is said**. Per user: how many threads,
   messages, and runs, the tokens used, and when they were last active. Per run: who, status,
   upstream model, timings, usage, the error code, and a **live event log by type and time**
   (LiveView subscribes to the same PubSub topics as API clients), which is enough to see runs
-  and extensions working. Thread titles, persona names in conversations, messages, replies, and
+  and extensions working. Thread titles, agent names in conversations, messages, replies, and
   event payloads (deltas, tool calls, what extensions recalled) are never shown; there is no
   thread view.
 - **Extensions** can mount their own admin pages, under the same rule: no conversation
@@ -218,10 +214,10 @@ UI, so no special bootstrap command is needed.
 
 ## User area (`/me`)
 
-Where users manage their own things, starting with their personas: create, edit (system prompt,
+Where users manage their own things, starting with their agents: create, edit (system prompt,
 upstream model, default params, extensions and their settings), make default, delete. It is a
 separate LiveView area next to `/admin`, not a restricted admin console, and uses the same
-persona form (`MeridianWeb.PersonaFormComponent`). Any model the upstream offers can be picked,
+agent form (`MeridianWeb.AgentFormComponent`). Any model the upstream offers can be picked,
 as in the admin console. Users can't create other users or see anyone else's things; there is
 still no signup.
 
@@ -234,11 +230,11 @@ still no signup.
   from the admin session and the `/api` sign-in cookie: `ADMIN_EMAILS` means nothing here, and a
   `/me` session never opens `/admin`. `/me` has its own LiveView socket (`/me/live`) for the
   same reason `/admin` does.
-- Personas are loaded through `Personas.get_persona!(user, id)`, so another user's id is a 404.
+- Agents are loaded through `Agents.get_agent!(user, id)`, so another user's id is a 404.
 - Browser apps find it as `account_url` in `GET /api/auth/session`.
-- The sidebar has the admin console's **Configure** group: crew (`/me`), skills (the global
+- The sidebar has the admin console's **Configure** group: agents (`/me`), skills (the global
   ones, which you can read, and your own), MCPs (soon), and extensions (`/me/extensions`: the global ones, which you can read, and your own,
-  which you write there; and which of your personas use each).
+  which you write there; and which of your agents use each).
 - *Later:* self-service API keys, browsing your own threads.
 
 ### Access requests (`/me/request`)
@@ -259,7 +255,7 @@ included, is xebec's amber. Both sidebars carry the mark.
   new name if one was given; it keeps its status. Lists are newest-asked first.
 - The admin console lists requests as cards (`/admin/requests`), email first, then the name.
   **Accept** creates the user (name: theirs, or the start of their email) with a default
-  persona on the model set at the top of the page (suggested: the newest user's), and deletes
+  agent on the model set at the top of the page (suggested: the newest user's), and deletes
   the request; they then sign in as usual. **Snooze** moves it to "Later", with no timer.
   **Reject** keeps it (so the same email can't keep asking) under "Rejected", where it can be
   restored.
@@ -356,7 +352,7 @@ The goal is to be moddable in the way the [pi coding agent](https://github.com/b
 is, without knowing up front what the mods will be. The design rule that keeps us from painting
 ourselves into a corner:
 
-> **The core only knows about runs, threads, personas, and the hook pipeline.
+> **The core only knows about runs, threads, agents, and the hook pipeline.
 > Everything else, including our own features, is an extension built on the public extension
 > API.**
 
@@ -367,7 +363,7 @@ something and we fix the API, not add a special case.
 ### What an extension is
 
 An extension is **middleware on the run lifecycle, plus a place to keep state and do background
-work, switched on per persona.** Concretely: a Lua script, stored in the database and edited in
+work, switched on per agent.** Concretely: a Lua script, stored in the database and edited in
 the browser, that the core calls at fixed hook points during a run. Adding a feature means
 writing a script and saving it, not editing the core, not deploying, and not working around it
 with MCP servers, skills, or prompt instructions. That matters for features like memory, which have to act without the
@@ -395,7 +391,7 @@ now, and what each capability will look like for scripts:
 | Contribute to the prompt  | `before_run` / `context` hooks (system prompt sections, injected messages) | Yes |
 | Call the model, read and title threads | The `meridian` table (`meridian.model.complete`, `meridian.threads.*`) | Yes |
 | Background work           | `jobs` functions, queued with `meridian.jobs.enqueue` (unique keys, delays) | Yes |
-| Configuration             | Settings with defaults, declared by the script, set per persona, checked by the script's `validate` | Yes |
+| Configuration             | Settings with defaults, declared by the script, set per agent, checked by the script's `validate` | Yes |
 | Provide model-callable tools | `tools` in the script: name → description, JSON Schema `parameters`, a `run` function (see [Tools](#tools)) | Yes |
 | Emit events to clients    | `ext.<name>.<type>` in the run event stream | Later |
 | Own data                  | Key-value storage through the `meridian` table (scripts can't run migrations) | Later |
@@ -435,11 +431,11 @@ M.tools = {
   `parameters` is a JSON Schema object, as a table or as a JSON string (Lua can't tell an empty
   object from an empty list: an empty table becomes an object, so leave out empty lists or use
   a string); without it the tool takes no arguments. They are checked when the script is saved.
-- **Enablement.** Enabling an extension on a persona enables all its tools. There are no
+- **Enablement.** Enabling an extension on an agent enables all its tools. There are no
   per-tool (or per-hook) switches in the core: an extension that wants a part to be optional
   makes it a setting, and `before_run` gets the run's tool set, so a script can drop its own
   tools; access that should differ is a different extension.
-- **The run's tool set.** At the start of a run, the tools of the persona's enabled extensions
+- **The run's tool set.** At the start of a run, the tools of the agent's enabled extensions
   are collected under the name `<extension>__<tool>` (shortened to 64 characters if needed, unique per run), offered to `before_run`
   (which may remove tools or change their descriptions), and frozen for the run: every model
   call of the run offers the same tools.
@@ -486,14 +482,14 @@ priority order (then installation order). Each returns
 `{:cont, value}` to pass a (possibly modified) value on, or `{:halt, reason}` where halting is
 allowed.
 
-Only extensions enabled on the run's persona are called (see
+Only extensions enabled on the run's agent are called (see
 [Enablement](#enablement-and-configuration)). Every handler receives the value for its hook and
-a context: the run, thread and user ids, the persona, and this extension's settings for that
-persona.
+a context: the run, thread and user ids, the agent, and this extension's settings for that
+agent.
 
 | Hook               | Receives / may change | Can halt? | Available |
 |--------------------|-----------------------|-----------|-----------|
-| `run_start`        | Run, thread, persona. Observe; set up per-run state | No | v0 |
+| `run_start`        | Run, thread, agent. Observe; set up per-run state | No | v0 |
 | `before_run`       | System prompt sections, model params, and the tool set for this run | Yes (reject run) | v0 (tool set: slice 5) |
 | `context`          | The conversation history about to be sent, without the system prompt (inject, trim, summarize, rewrite). Called before every model call of the run | No | v0 |
 | `before_model_request` | The final upstream request body (model routing, params). Called before every model call | No | v0 |
@@ -520,7 +516,7 @@ In Lua, a chained hook returns the (changed) value, or nothing to leave it as it
 `before_run` rejects the run with `return false, "reason"`. Values cross the boundary as plain
 data (tables become maps, or lists when their keys are 1..n).
 
-`before_run` gets the system prompt as a list of sections (the persona's first); they are joined
+`before_run` gets the system prompt as a list of sections (the agent's first); they are joined
 with blank lines, and the result goes first in the request as for `/v1` (merged into a leading
 system message from `context`, if there is one).
 
@@ -567,34 +563,34 @@ subscriptions send.
 
 ### Enablement and configuration
 
-- **Available** = global (made in `/admin`) or the persona's user's own (made in `/me`).
-  **Enabled** = switched on for a given persona. Nothing is on by default; since personas belong
+- **Available** = global (made in `/admin`) or the agent's user's own (made in `/me`).
+  **Enabled** = switched on for a given agent. Nothing is on by default; since agents belong
   to users, a user who doesn't want an extension simply doesn't enable it.
-- `personas.extensions` maps each enabled extension's **id** to its settings. Present means
+- `agents.extensions` maps each enabled extension's **id** to its settings. Present means
   enabled: `{"0192…": {"timezone": "Europe/Stockholm"}}`. Ids, not names, because a user's own
   extension may share a name with a global one.
-- Each script declares the settings it accepts and their defaults. The persona form lists every
-  extension available to the persona's user with an on/off toggle and its settings, checked by
+- Each script declares the settings it accepts and their defaults. The agent form lists every
+  extension available to the agent's user with an on/off toggle and its settings, checked by
   the script's `validate` on save.
-- Settings are frozen into the run with the rest of the persona (`runs.persona_snapshot`), so
-  changing a persona never affects a run in flight.
+- Settings are frozen into the run with the rest of the agent (`runs.agent_snapshot`), so
+  changing an agent never affects a run in flight.
 - The scripts are not frozen: saving one changes it for runs in flight from their next hook.
-- A persona that lists an extension that's gone (or isn't available to its user) keeps the
-  entry, but it is ignored at run time and shown as gone in the persona form.
+- An agent that lists an extension that's gone (or isn't available to its user) keeps the
+  entry, but it is ignored at run time and shown as gone in the agent form.
 - *Later:* API key policies further restricting or configuring extensions (e.g. read-only memory
-  for a coding agent's key), merged over persona settings. Deferred: it requires runs to record
+  for a coding agent's key), merged over agent settings. Deferred: it requires runs to record
   which key started them.
 
 ## Skills
 
 A skill is instructions for a kind of task: a **name**, a **description** (what it's for, and
 when to use it), and a **prompt** (the instructions). Like extensions, skills are global (made
-in `/admin/skills`) or a user's own (made in `/me/skills`), and personas enable them by id
-(`personas.skills`); ids of skills that are gone are kept but ignored. A user's own skill with
+in `/admin/skills`) or a user's own (made in `/me/skills`), and agents enable them by id
+(`agents.skills`); ids of skills that are gone are kept but ignored. A user's own skill with
 the same name as a global one replaces it.
 
 **Progressive disclosure.** The model doesn't get every skill's instructions on every request.
-A run with skills adds a section to the system prompt (after the persona's) listing each
+A run with skills adds a section to the system prompt (after the agent's) listing each
 enabled skill's name and description, and offers a `load_skill` tool (its `name` parameter is
 an enum of the enabled skills) that returns a skill's prompt. The model loads a skill when a
 task matches its description, so a skill costs only its description until it's needed. The
@@ -603,8 +599,8 @@ drop them; calls go through `tool_call` and `tool_result`. The run uses the skil
 were when it started.
 
 **Recommended extensions.** A skill can list extensions it works best with (a database skill
-might want an HTTP extension). It's a hint, not a dependency: a persona that enables the skill
-without one of them gets a warning in the persona form, and nothing else happens. A global
+might want an HTTP extension). It's a hint, not a dependency: an agent that enables the skill
+without one of them gets a warning in the agent form, and nothing else happens. A global
 skill can only recommend global extensions.
 
 ## Identity: users, API keys, policies
@@ -624,7 +620,7 @@ skill can only recommend global extensions.
   seen for the first time is linked to the user whose email matches the provider's userinfo
   (unless marked unverified); a user already linked to another identity is never relinked, and
   without a matching user the request is refused. The operator can unlink in the admin UI.
-  Signed-in users get the default policy (all their personas). Run events tokens are tied to
+  Signed-in users get the default policy (all their agents). Run events tokens are tied to
   the user instead of a key. Access tokens aren't checked for revocation; they are short-lived.
 - **Sign-in sessions** (on whenever `OIDC_CLIENT_ID` is set) are for browser apps without a backend,
   such as xebec. They can't run the login themselves: the code-for-token exchange is a browser
@@ -648,28 +644,28 @@ skill can only recommend global extensions.
 
 ```jsonc
 {
-  "default_persona": "coder",            // used if the client sends an unknown/generic model
-  "allowed_personas": ["coder", "default"],
+  "default_agent": "coder",            // used if the client sends an unknown/generic model
+  "allowed_agents": ["coder", "default"],
   "extensions": {                         // per-extension overrides (native surface, later)
     "memory": { "scopes": ["coding"], "write": "explicit" }
   }
 }
 ```
 
-## Personas
+## Agents
 
-A persona is a named bundle presented to clients as a model:
+An agent is a named bundle presented to clients as a model:
 
 - `slug` (→ model id `meridian/<slug>`), display name
 - system prompt
 - upstream model + default params (temperature, max tokens, ...)
-- enabled extensions + their per-persona config
+- enabled extensions + their per-agent config
 
 On create/update, the upstream model is **validated against the provider's `/v1/models`**
 (cached briefly). Passing `force: true` skips validation, for upstreams that don't list all
 models or that are temporarily down.
 
-Personas belong to a user. A default persona is created along with each new user.
+Agents belong to a user. A default agent is created along with each new user.
 
 ## Memory
 
@@ -699,12 +695,12 @@ All ids are UUIDv7 (time-ordered). Timestamps are `utc_datetime_usec`.
 ```text
 users           id, name, email, oidc_issuer?, oidc_subject?, inserted_at
 api_keys        id, user_id, name, prefix, token_hash, policy jsonb, last_used_at, revoked_at
-personas        id, user_id, slug, name, system_prompt, model, params jsonb,
+agents        id, user_id, slug, name, system_prompt, model, params jsonb,
                 extensions jsonb, skills uuid[], is_default
-threads         id, user_id, persona_id, title, settings jsonb, archived_at, inserted_at, updated_at
+threads         id, user_id, agent_id, title, settings jsonb, archived_at, inserted_at, updated_at
 messages        id, thread_id, run_id?, parent_id?, role (user, assistant, tool), content jsonb (parts),
                 tool_calls jsonb?, tool_call_id?, metadata jsonb, usage jsonb?, inserted_at
-runs            id, thread_id, user_message_id, parent_run_id?, status, persona_snapshot jsonb,
+runs            id, thread_id, user_message_id, parent_run_id?, status, agent_snapshot jsonb,
                 model, step_count, usage jsonb, error jsonb?, heartbeat_at,
                 started_at, finished_at
 run_steps       id, run_id, index, status, request jsonb, response jsonb, tool_results jsonb
@@ -720,7 +716,7 @@ Notes:
   (see the decision log); the rest are added when a feature needs them.
 - `messages.parent_id` allows edit-and-regenerate / branching later without a schema change.
 - `messages.metadata` gives extensions a place to annotate messages without schema changes.
-- `runs.persona_snapshot` freezes the persona config (including extension config) used.
+- `runs.agent_snapshot` freezes the agent config (including extension config) used.
 - `run_events` can be pruned after a retention period, since final messages live in `messages`.
 
 ## Configuration
@@ -743,7 +739,7 @@ is in the repo.
 | `ADMIN_EMAILS`         | Emails allowed into `/admin` via sign-in (comma-separated); unset = admin sign-in off |
 | `OIDC_AUDIENCES`       | Client ids whose access tokens `/v1` and `/api` accept. Unset = API keys only |
 
-Extensions declare their own settings in their scripts; personas set them.
+Extensions declare their own settings in their scripts; agents set them.
 
 ## Deployment
 
@@ -778,14 +774,14 @@ Each slice should end with something usable, not just a layer.
 - Phoenix (API), Ecto, Oban, Req, health probes, Dockerfile, CI + multi-arch image, compose
   for local Postgres.
 
-**Slice 1: usable persona proxy.** ✅ *Done when: pi (or any OpenAI client) talks to an upstream
-model through Meridian, using a persona.*
+**Slice 1: usable agent proxy.** ✅ *Done when: pi (or any OpenAI client) talks to an upstream
+model through Meridian, using an agent.*
 
 1. Admin UI skeleton: LiveView plumbing, `ADMIN_TOKEN` login.
 2. Users + API keys (schemas, admin pages, API-key auth plug).
 3. Upstream client (`/v1/models`, streaming chat completions via Req).
-4. Personas (schema, admin pages, upstream model validation with `force`).
-5. `/v1/models` + `/v1/chat/completions` persona proxy (streaming).
+4. Agents (schema, admin pages, upstream model validation with `force`).
+5. `/v1/models` + `/v1/chat/completions` agent proxy (streaming).
 
 **Slice 2: durable conversations.** ✅ *Done when: a first-party client can send a message, quit,
 reconnect, and see the full reply.*
@@ -797,15 +793,15 @@ reconnect, and see the full reply.*
 Deferred from slice 2 (see the decision log): crash recovery by resuming runs (`run_steps`,
 `step.restarted`), `if_busy: queue | interrupt`, the thread-level SSE stream.
 
-**Slice 3: extension API v0.** ✅ *Done when: two built-in extensions, enabled per persona, work
+**Slice 3: extension API v0.** ✅ *Done when: two built-in extensions, enabled per agent, work
 using only the public extension API.*
 
 1. `Meridian.Extension` behaviour, the hook pipeline (every v0 hook in
    [Hook points](#hook-points), with timeouts and fail-open/closed semantics), and the
    `Meridian.Extension.API` facade.
-2. Per-persona enablement and settings, including the admin persona form.
+2. Per-agent enablement and settings, including the admin agent form.
 3. `datetime` extension: adds the current date and time to the system prompt (`before_run`
-   hook), with a per-persona timezone setting.
+   hook), with a per-agent timezone setting.
 4. `title` extension: after a thread's first completed run, a background job asks the model for
    a title and sets it only if the thread still has none (`run_end` hook, Oban job, model call
    from an extension). Clients see it the next time they fetch the thread.
@@ -821,9 +817,9 @@ without a deploy, by the operator or by a user for themselves.*
    and limits.
 2. The script editor in `/admin/extensions` and `/me/extensions`: save checks the script, the
    latest error is shown, import and export as `.lua`.
-3. Personas enable extensions by id.
+3. Agents enable extensions by id.
 
-**Slice 4: memory extension.** Design TBD (including whether personas share memories). Adds
+**Slice 4: memory extension.** Design TBD (including whether agents share memories). Adds
 extension-owned tables; the real stress test of the extension API.
 
 **Slice 5: tools v0.** ✅ *Done when: a tool written in an extension's script is offered to the
@@ -835,7 +831,7 @@ model, called, and its result used, over as many steps as the model needs, in a 
 3. Tool calls and tool messages saved in the thread and sent back upstream.
 
 **Slice 6: skills.** ✅ *Done when: a skill written in `/me` or `/admin` is offered to the
-model by the personas that enable it, and loaded when a task calls for it.*
+model by the agents that enable it, and loaded when a task calls for it.*
 
 **Next**
 - `meridian.http` for scripts (with SSRF rules), so tools can call APIs
@@ -860,15 +856,15 @@ Add an entry whenever a decision is made or reversed.
 |---|---|---|
 | **Elixir/OTP** | TypeScript, Rust, Python | The core problem (long-lived, crash-tolerant sessions that outlive connections and fan out to subscribers) is what OTP is built for. TS has no particular fit; Rust adds a lot of async ceremony for I/O-bound work where the heavy compute lives in the inference server. Python was ruled out by preference. |
 | **Postgres + Oban for jobs, PubSub for fan-out** | Redis/NATS, Temporal/Restate | One stateful dependency to operate. Oban gives a durable queue (`SKIP LOCKED`), retries, and cron on Postgres. Temporal-style durable execution is overkill for a single-operator deployment; the `RunServer` boundary keeps the option open. |
-| **Two surfaces: stateless `/v1` + stateful `/api`** | Stateful only; OpenAI-compat only | Generic clients (chat UIs, coding agents) only speak stateless Chat Completions; durable threads need server-owned state. Same personas, different lifecycle owner. |
-| **Stateless `/v1` is a pure persona proxy** | Server tools/memory on `/v1` | Mixing server and client tool calls in one stateless response is messy (every tool call needs a result the client doesn't have; server tool exchanges vanish from the client's history). Keep it dead simple; revisit later (open question 1). |
-| **Personas exposed as model ids** | Custom headers, per-key persona only | Works in every OpenAI client without changes: pick `meridian/<persona>` as the model. |
+| **Two surfaces: stateless `/v1` + stateful `/api`** | Stateful only; OpenAI-compat only | Generic clients (chat UIs, coding agents) only speak stateless Chat Completions; durable threads need server-owned state. Same agents, different lifecycle owner. |
+| **Stateless `/v1` is a pure agent proxy** | Server tools/memory on `/v1` | Mixing server and client tool calls in one stateless response is messy (every tool call needs a result the client doesn't have; server tool exchanges vanish from the client's history). Keep it dead simple; revisit later (open question 1). |
+| **Agents exposed as model ids** | Custom headers, per-key agent only | Works in every OpenAI client without changes: pick `meridian/<agent>` as the model. |
 | **Memory is an extension, not core** | Building pgvector memory into core | The memory design (vector store, graph, Honcho, reflective vs. explicit) is undecided. Making it an extension defers the choice and tests the extension API. |
 | ~~**Core features are extensions; hooks added on demand**~~ *Reversed in slice 3, see below* | Designing the full hook API up front | Keeps the extension API real (proven by our own features) without building speculative hooks. |
 | ~~**One callback per hook**~~ *Moot since extensions are Lua scripts: a script defines a function per hook* | A single `handle_hook/3` | Discoverability and Dialyzer. Remote extensions get a generic form at the protocol boundary. |
 | **SSE + Phoenix Channels over one event log** | SSE only; WebSocket only | SSE for simple clients/curl, Channels for rich bidirectional clients. Neither has special semantics. |
 | **Admin UI is LiveView in the same release** | Separate SPA (e.g. TS) | One deployable, no extra API client or CORS. The live run view subscribes to the same PubSub topics as clients. No Node toolchain: the LiveView JS can be served from the dependency. |
-| **The admin console never shows conversations**: usage and run metadata only (counts, tokens, status, timings, event types); no thread view, titles, personas of threads, messages, replies, event payloads, or upstream error messages (they can quote the request) | Showing everything to the operator (the slice 2 thread and live run views); an opt-in per user | Running Meridian for friends shouldn't mean reading their chats. What the operator needs (is it working, what does it cost, who uses it) doesn't need the contents. Replaces the reply and payloads in the live run view; looking at what a run said is for the user, in their own client. |
+| **The admin console never shows conversations**: usage and run metadata only (counts, tokens, status, timings, event types); no thread view, titles, agents of threads, messages, replies, event payloads, or upstream error messages (they can quote the request) | Showing everything to the operator (the slice 2 thread and live run views); an opt-in per user | Running Meridian for friends shouldn't mean reading their chats. What the operator needs (is it working, what does it cost, who uses it) doesn't need the contents. Replaces the reply and payloads in the live run view; looking at what a run said is for the user, in their own client. |
 | **Admin auth via deployment secret `ADMIN_TOKEN`** | Admin scope on user API keys, user passwords | Operating the instance and using it are different roles with different credentials. Also removes the need for a bootstrap command. |
 | **OIDC sign-in for admin, with an `ADMIN_EMAILS` allowlist; `ADMIN_TOKEN` stays as an optional fallback** | WorkOS-specific integration (its User Management API or SDK); a proxy in front (oauth2-proxy, Cloudflare Access); token only | No long secret to keep and paste. Generic OIDC works with WorkOS AuthKit and any other provider, so deployments pick their own. The allowlist is needed because a provider only says who someone is, not that they operate this instance. Hand-rolled with Req and `:crypto` (RS256 only) instead of a JOSE dependency. |
 | ~~**Clients may authenticate with OIDC access tokens; Meridian is a resource server, not an authorization server**~~ *Amended, see "Meridian runs the login for browser apps" below* | Meridian running the login and minting its own tokens or API keys per client; cookie sessions for `/api` | Keeps one client contract (a bearer token) and keeps Meridian ignorant of clients. Clients use the provider's SDKs; Meridian only verifies. No cookies keeps the CORS reasoning intact. API keys stay for generic clients. |
@@ -876,12 +872,12 @@ Add an entry whenever a decision is made or reversed.
 | **Meridian runs the login for browser apps, with a cookie session on `/api`** (amends "Meridian is a resource server") | The app proxying the provider's token endpoint to get around CORS; a separate backend per app; the provider's browser SDK (a different WorkOS product, with its own tokens) | A static app can't trade the code for tokens: WorkOS's token endpoint doesn't send CORS headers for OAuth applications. Meridian already runs this flow for `/admin` and owns users and identities, so it owns the whole sign-in and apps stay ignorant of the provider. The cookie is same-origin only, so the CORS reasoning holds. Access tokens (`OIDC_AUDIENCES`) stay for clients that log in themselves. |
 | **One OIDC client for admin and user sign-in** (`OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET`; amends the two entries above) | Separate admin and user clients (`ADMIN_OIDC_CLIENT_*`, `USER_OIDC_CLIENT_*`) | Both flows are Meridian signing someone in, so they are one app at the provider with two redirect URIs; two clients only meant two of each setting. What separates the roles is `ADMIN_EMAILS`, not the client: a user sign-in never creates an admin session, and admin sign-in is off without the allowlist. The old variable names fail at boot with a pointer to the new ones. |
 | **Generic and environment-agnostic** | Assuming a specific inference server or cluster | Public project. Everything deployment-specific comes from env vars; deployment values live in the operator's own infrastructure repo. |
-| **Persona resolution on `/v1`**: `meridian/<slug>` → that persona (404 if unknown or not allowed); a raw upstream id → passthrough when `EXPOSE_UPSTREAM_MODELS`; anything else → the key's `default_persona`, else the user's default persona | Rejecting unknown models; falling back for unknown `meridian/` slugs too | Clients with a hardcoded model name (`gpt-4o`) still work, but a typo in an explicit persona id fails loudly instead of silently using the wrong persona. |
-| **Persona system prompt goes first, merged into the client's leading system/developer message** | A separate extra system message; appending after the client's | Some chat templates reject more than one system message or one that isn't first. The persona's identity comes before the client's (e.g. a coding agent's) instructions. |
-| **Persona params are defaults; client values win** | Persona params override the client | Clients tune per-request (e.g. temperature for tool calls); personas set sensible defaults. `model` and `messages` can't be persona params. |
+| **Agent resolution on `/v1`**: `meridian/<slug>` → that agent (404 if unknown or not allowed); a raw upstream id → passthrough when `EXPOSE_UPSTREAM_MODELS`; anything else → the key's `default_agent`, else the user's default agent | Rejecting unknown models; falling back for unknown `meridian/` slugs too | Clients with a hardcoded model name (`gpt-4o`) still work, but a typo in an explicit agent id fails loudly instead of silently using the wrong agent. |
+| **Agent system prompt goes first, merged into the client's leading system/developer message** | A separate extra system message; appending after the client's | Some chat templates reject more than one system message or one that isn't first. The agent's identity comes before the client's (e.g. a coding agent's) instructions. |
+| **Agent params are defaults; client values win** | Agent params override the client | Clients tune per-request (e.g. temperature for tool calls); agents set sensible defaults. `model` and `messages` can't be agent params. |
 | **`/v1` relays the upstream response byte-for-byte** (status, content type, body; one path for streaming and non-streaming) | Parsing SSE and re-encoding; rewriting `model` in responses | Dead simple and transparent. Upstream errors reach the client unchanged. A client disconnect fails the next write, which cancels the upstream request. |
 | **Upstream model list cached for 60 s** (validation and `/v1/models`) | No cache; long cache | Partly answers open question 6. Short enough that new upstream models show up quickly. |
-| **The default persona's model is chosen when creating a user** | A `DEFAULT_MODEL` env var; personas with no model | Every user needs a working default persona immediately, and there's no deployment-wide "right" model. |
+| **The default agent's model is chosen when creating a user** | A `DEFAULT_MODEL` env var; agents with no model | Every user needs a working default agent immediately, and there's no deployment-wide "right" model. |
 | **Admin UI has no asset build**: hand-written CSS, Phoenix/LiveView JS served from the deps | Tailwind/esbuild | No Node or asset toolchain for a small operator console. Lets the CSP forbid inline scripts. |
 | **Multi-arch images built on native runners** | QEMU emulation | Deployments may mix amd64 and arm64 nodes. Native arm64 GitHub runners are much faster than emulation. |
 
@@ -899,32 +895,32 @@ Add an entry whenever a decision is made or reversed.
 | **A run only completes if the upstream reported a `finish_reason`**; a stream that ends without one, or contains an event that isn't valid JSON, fails the run (`upstream_incomplete` / `upstream_error`) and saves no reply. `[DONE]` is not required if a finish reason arrived | Treating the end of the HTTP body as success; skipping malformed events | A dropped connection must not be saved as a complete answer, especially once `run_end` hooks act on completed runs. Partial text is only kept for cancels, where the user chose to stop. |
 | **UUIDv7 ids are generated with monotonic precision** | Millisecond precision | Messages are ordered by id; ids created within the same millisecond must still sort in creation order. |
 | **Every hook the run lifecycle can fire exists from v0, used or not** (replaces "hooks added on demand"). Tool hooks and `step_end` come with the tool loop | Adding each hook only when an extension needs it | Extensions should be able to hook anything in the lifecycle without a core change first; that is the point of the API. Unused hooks are covered by tests instead of a consumer. Core features remain extensions. |
-| **Extensions are enabled per persona, off by default**; `personas.extensions` maps name → settings (*amended: id → settings, see below*) (present = enabled), frozen into the run's persona snapshot | Global enablement; on-by-default extensions | Users and personas differ (memory on one persona only, or not at all). Since personas belong to users, this also gives per-user control. |
-| **API key policy overrides for extensions are deferred** | Building deploy → persona → key merging now | Runs don't record which key started them, so background work couldn't apply the key layer. Per-persona settings cover the need for now. |
+| **Extensions are enabled per agent, off by default**; `agents.extensions` maps name → settings (*amended: id → settings, see below*) (present = enabled), frozen into the run's agent snapshot | Global enablement; on-by-default extensions | Users and agents differ (memory on one agent only, or not at all). Since agents belong to users, this also gives per-user control. |
+| **API key policy overrides for extensions are deferred** | Building deploy → agent → key merging now | Runs don't record which key started them, so background work couldn't apply the key layer. Per-agent settings cover the need for now. |
 | **Extensions call the core only through `Meridian.Extension.API`** (*now the `meridian` table, see below*) | Extensions calling internal contexts (`Threads`, `Upstream`) | Gives "built only on the public extension API" a real meaning and keeps the core free to change internally. |
 | **`run_end` fires after the run's final state is committed, from whichever process ended it** | Only from the `RunServer` | Runs also end in the janitor, the worker (crash), and when a queued run is cancelled. Every end fires the hook exactly once, and handlers never run inside the transaction. |
 | **Hook handlers run in a supervised task with a timeout, not in the caller** | `try/rescue` in the calling process | A handler that hangs can't stall the `RunServer` (it must keep handling cancels and heartbeats), and a crash can't take the caller down. Spawning a process is cheap on the BEAM; handlers that aren't implemented cost nothing. |
-| **Extension settings are edited as JSON per extension** in the admin persona form | A typed settings schema rendered as fields | One generic form for every extension, like persona params. Extensions validate their own settings (`validate_settings/1`, now the script's `validate`). A schema can come later if the JSON gets in the way. |
-| **Thread hooks use the persona's current settings** | Freezing them | There is no run to freeze them in. |
+| **Extension settings are edited as JSON per extension** in the admin agent form | A typed settings schema rendered as fields | One generic form for every extension, like agent params. Extensions validate their own settings (`validate_settings/1`, now the script's `validate`). A schema can come later if the JSON gets in the way. |
+| **Thread hooks use the agent's current settings** | Freezing them | There is no run to freeze them in. |
 | **Generated titles don't bump `updated_at` and aren't pushed to clients** | A `thread.updated` event | A title isn't activity, so the thread shouldn't move up the list. Clients see it on their next fetch; a push can come with a thread-level event stream. |
 | **Development reads `.env` itself** (in `config/runtime.exs`; shell variables win); releases and tests only use real environment variables | `source`/`set -a` by hand; direnv; a dotenv library | Running locally shouldn't need shell tricks. A dozen lines cover `KEY=value` files without a dependency, and deployments keep config in the platform's environment, not in files. |
 | **Timezones via the `tz` package** | UTC offsets only | Elixir only ships UTC. Named zones with daylight saving need a timezone database; `tz` is small and has no runtime dependencies. |
-| **Slice 3 is proven by two tiny extensions (`datetime`, `title`)** (*both later removed with the move to Lua scripts*)**;** memory gets its own slice; Channels are dropped for now** | Title generation alone; memory in slice 3; Channels in slice 3 | Titles alone only exercise `run_end`. Memory's design (e.g. shared across personas or not) is a memory question, not an API one. No client needs WebSockets yet. |
+| **Slice 3 is proven by two tiny extensions (`datetime`, `title`)** (*both later removed with the move to Lua scripts*)**;** memory gets its own slice; Channels are dropped for now** | Title generation alone; memory in slice 3; Channels in slice 3 | Titles alone only exercise `run_end`. Memory's design (e.g. shared across agents or not) is a memory question, not an API one. No client needs WebSockets yet. |
 | **Kubernetes manifests are kustomize bases** (`deploy/app`, `deploy/postgres`) that overlays reference by URL; configuration comes from generated ConfigMaps/Secrets | A Helm chart; manifests only in the operator's repo; building images on a cluster node | Plain YAML with no templating to learn, and overlays keep every deployment-specific value out of this public repo. Generated names roll the Deployment when config changes. CI already builds multi-arch images in about two minutes, so nodes only ever pull. |
 | **Health probes are exempt from `force_ssl`** | Probing over HTTPS; a separate probe port | kubelet calls the pod over plain HTTP and counts a redirect to another host as success, so `/readyz` would pass with the database down. |
-| **Users manage their own personas in `/me`, a LiveView area separate from `/admin`** | User roles inside `/admin`; only a JSON API for clients (e.g. xebec) to build on | Keeps operating and using Meridian as different roles with different sessions: a bug in `/me` can't open `/admin`. Lives in the release (no client needed, no asset build) and reuses the admin persona form and the sign-in Meridian already runs. A JSON API for personas can come later on the same user-scoped domain functions. |
+| **Users manage their own agents in `/me`, a LiveView area separate from `/admin`** | User roles inside `/admin`; only a JSON API for clients (e.g. xebec) to build on | Keeps operating and using Meridian as different roles with different sessions: a bug in `/me` can't open `/admin`. Lives in the release (no client needed, no asset build) and reuses the admin agent form and the sign-in Meridian already runs. A JSON API for agents can come later on the same user-scoped domain functions. |
 | **`/me` signs in with the OIDC provider only, into its own `SameSite=Lax` cookie** | Reusing the `/api` sign-in cookie; `SameSite=Strict` with a meta-refresh callback like `/admin` | The `/api` cookie is scoped to `/api` and checked differently (`X-Requested-With`); LiveView needs a real session. Lax keeps people signed in when they follow a link to `/me` from an app; forms and the LiveView socket carry CSRF tokens, and the callback can simply redirect. |
 | **Users may pick any upstream model in `/me`** | An operator-defined allowlist of models | Nobody needs a limit yet; it can be added when someone does. |
 | **A public access request page; the operator accepts, snoozes, or rejects in the admin console** (keeps "no signup") | Signup; the operator collecting emails by hand; invite links | Lets friends ask without the operator typing their details, while users are still only ever created by the operator. Accepting reuses user creation, so the request holds nothing but an email and a name. |
 | **Request answers don't depend on the email; rejected requests are kept; open requests are capped at 200** | Telling people they already have access; deleting rejected requests; rate limiting by IP | The page is public, so it mustn't reveal who uses Meridian. Keeping rejections stops the same email from asking again. A cap is a dependency-free bound on abuse; IP rate limiting can come if it's needed. |
 | **Asking again bumps the existing request; it keeps its status** | Ignoring repeats; a row per request; un-snoozing or un-rejecting on a repeat | No duplicates in the list, but the operator still sees that someone asked again, and when. An upsert on the email index makes it one statement, so simultaneous requests can't make two rows. Repeats don't undo the operator's snooze or reject. |
 | **Snooze just moves a request to "Later"** | Snoozing for a set time | It means "I'll look at this later"; a timer would decide "later" for the operator. |
-| **Accepting asks for the default persona's model once, at the top of the requests page** | A model field per card; going through the new-user form | Every user needs a default persona with a model; one page-level choice (prefilled with the newest user's model) keeps accepting to one click. |
-| **Navigation is a sidebar; the admin console's is `/me`'s plus an "Operate" group above it** (users, requests, runs over crew, skills, MCPs, extensions) | Top-bar links; separate, unrelated menus per area | The list is outgrowing a top bar. Giving both areas the same lower group keeps them recognisably the same product, while each shows what it should on those pages (the console: everyone's; `/me`: yours). Unbuilt entries show as "soon" rather than empty pages. |
-| **The UI calls a set of personas a "crew"**, for any number of them, zero and one included; one is still a persona. Code and APIs keep `persona` | Switching between "persona" and "crew" by count; renaming the API and schema | A fixed word for the set reads consistently. Renaming endpoints (`/api/personas`) would break clients for a label. |
+| **Accepting asks for the default agent's model once, at the top of the requests page** | A model field per card; going through the new-user form | Every user needs a default agent with a model; one page-level choice (prefilled with the newest user's model) keeps accepting to one click. |
+| **Navigation is a sidebar; the admin console's is `/me`'s plus an "Operate" group above it** (users, requests, runs over agents, skills, MCPs, extensions) | Top-bar links; separate, unrelated menus per area | The list is outgrowing a top bar. Giving both areas the same lower group keeps them recognisably the same product, while each shows what it should on those pages (the console: everyone's; `/me`: yours). Unbuilt entries show as "soon" rather than empty pages. |
+| **The UI calls a set of personas a "crew"**, for any number of them, zero and one included; one is still a persona. Code and APIs keep `persona` (*reversed: everything says agent, see below*) | Switching between "persona" and "crew" by count; renaming the API and schema | A fixed word for the set reads consistently. Renaming endpoints (`/api/personas`) would break clients for a label. |
 | **Extensions are Lua scripts stored in the database and edited in the browser; there are no extensions in the repo** (replaces Elixir modules listed in config, and the built-in `datetime` and `title`) | Elixir modules in the release; Elixir compiled at runtime (`Code.compile_string`); TypeScript on a Deno sidecar; JavaScript on QuickJS/WASM; Rust compiled to WASM | Changing an extension should be "click it, edit, save", without git or a deploy. Users write their own, so the code must be sandboxed: Elixir can call anything (no sandbox is possible), Rust needs a toolchain and a build per save, Deno and QuickJS add a process or native code to operate. Lua is small, sandboxed by default, and the `lua` package runs it in Elixir with no native code, on the BEAM's process isolation. The cost: no dependencies, and a slow interpreter (fine for every hook but per-chunk ones). A second runtime (TypeScript) can be added per row later. |
-| **Extensions are global (made in `/admin`) or a user's own (made in `/me`)**; where one is made decides which, with no setting. Admins can read and edit all of them; users can read global ones | Global only; a visibility setting; users' extensions private from the operator | Users can extend their own crew without the operator. The operator sees users' code because it runs on their server and can be expensive or harmful in ways that matter; privacy of what extensions are configured with (e.g. secrets) can be solved later, both ways. |
-| **Personas enable extensions by id** (amends name → settings); the migration cleared existing entries | Names, unique across all extensions | A user's own extension may share a name with a global one; ids also make renaming free. The old entries named the removed built-ins. |
+| **Extensions are global (made in `/admin`) or a user's own (made in `/me`)**; where one is made decides which, with no setting. Admins can read and edit all of them; users can read global ones | Global only; a visibility setting; users' extensions private from the operator | Users can extend their own agents without the operator. The operator sees users' code because it runs on their server and can be expensive or harmful in ways that matter; privacy of what extensions are configured with (e.g. secrets) can be solved later, both ways. |
+| **Agents enable extensions by id** (amends name → settings); the migration cleared existing entries | Names, unique across all extensions | A user's own extension may share a name with a global one; ids also make renaming free. The old entries named the removed built-ins. |
 | **Scripts reach Meridian only through the `meridian` table, always scoped to the user of the call's context** | Exposing `Meridian.Extension.API` as-is (it can read any thread) | A sandbox is only as tight as what it's given. Scoping every capability to the run's user from the start is what makes letting users write extensions safe. |
 | **Every script call starts from the state the script was loaded in; scripts are loaded once per version per node and cached in ETS, keyed by a hash of the source** | Keeping a live Lua state per extension; reloading on every call; invalidating caches over PubSub | Calls can't leak state between users or runs, and there's no shared mutable state to coordinate. Checking the hash on use means a saved script is picked up everywhere without telling anyone. State that should persist will get a key-value capability. |
 | **Each call has a timeout, a memory cap, and an instruction budget (2 million)** | Only the timeout | The budget gives a deterministic "instruction budget exceeded" for runaway loops, also while a script loads (on save, in the request). The memory cap stops a script from growing the node. |
@@ -932,21 +928,22 @@ Add an entry whenever a decision is made or reversed.
 | **An extension's latest error is kept in memory on each node and shown on its page, live**; saving clears it | Error columns on the row; only the server log | Script authors need to see why their hook was skipped without server access. It's diagnostic, not data, so losing it on restart is fine, and it keeps the table to name, source, and owner. |
 | **Import only fills the editor; export downloads `<name>.lua`. No versions yet** | Importing straight into a saved extension; version history now | Import is copy-paste with a file picker: the script is checked when saved, like typed code. Versions are wanted but not needed to experiment. |
 | **Tools are part of extensions: `tools` in the script, next to hooks and jobs** | A separate kind of row for tools; tools only from MCP servers | A tool and a hook are both Lua functions Meridian calls with a context; only who decides to call them differs (the model, or the lifecycle). Keeping them in one script lets a feature (memory: inject in `context`, save with a `remember` tool) be one extension sharing code and settings, with no second sandbox, editor, or enablement. |
-| **Enabling an extension enables all its tools; no per-tool or per-hook switches in the core** | Per-persona tool checkboxes (a new `personas.extensions` shape); per-hook toggles | The author knows which parts belong together; switching hooks off one by one can leave an extension half-working, and hook names mean nothing to users. Optional parts are settings (and `before_run` can drop a script's own tools); different access is a different extension. Keeps `personas.extensions` as it is. |
-| **Tool names sent upstream are `<extension>__<tool>`** | The tool's own name; names chosen by the persona | Two extensions can both have a `search`; the extension name makes them unique and tells the model where a tool comes from. Upstreams allow `[a-zA-Z0-9_-]` (which extension and tool names already are), up to 64 characters; longer names are shortened, keeping them unique. |
+| **Enabling an extension enables all its tools; no per-tool or per-hook switches in the core** | Per-agent tool checkboxes (a new `agents.extensions` shape); per-hook toggles | The author knows which parts belong together; switching hooks off one by one can leave an extension half-working, and hook names mean nothing to users. Optional parts are settings (and `before_run` can drop a script's own tools); different access is a different extension. Keeps `agents.extensions` as it is. |
+| **Tool names sent upstream are `<extension>__<tool>`** | The tool's own name; names chosen by the agent | Two extensions can both have a `search`; the extension name makes them unique and tells the model where a tool comes from. Upstreams allow `[a-zA-Z0-9_-]` (which extension and tool names already are), up to 64 characters; longer names are shortened, keeping them unique. |
 | **Tool failures are results for the model, not run failures** | Failing the run on any tool error | Models handle `Error: ...` well (retry, other arguments, tell the user); one bad call shouldn't throw away the run. |
 | **Tool calls are approved automatically, for now** | Building approval (`awaiting_approval`) with the loop | The point of the first version is the execution path. Approval needs runs that pause and resume, which needs `run_steps`. |
 | **`context` and `before_model_request` run before every model call; `before_run` once per run** | Calling every hook once per run | Extensions that trim or inject history must see the tool messages of earlier steps, and every request goes through the same path. The system prompt, params, and tool set are the run's and don't change between steps. |
 | **A tool call without a result is sent upstream as interrupted** | Saving placeholder results when a run ends; leaving the history as it is | Upstreams reject an assistant `tool_calls` message without a result for every call. Fixing it when the history is built covers every way a run can end (cancel, failure, a dead node) in one place. |
-| **Skills are core data, not an extension**: rows with a name, description, and prompt, global or a user's own, enabled per persona, with their own pages | A skills extension in Lua reading skills through the `meridian` table; skills as files | A skill is content, not code: writing one should be filling in a form, and it should work without someone first writing the extension that delivers it. It reuses the extension model (global or own, enabled by id, gone ids kept) so there's nothing new to learn. Amends "core features are extensions" for this one feature. |
+| **Skills are core data, not an extension**: rows with a name, description, and prompt, global or a user's own, enabled per agent, with their own pages | A skills extension in Lua reading skills through the `meridian` table; skills as files | A skill is content, not code: writing one should be filling in a form, and it should work without someone first writing the extension that delivers it. It reuses the extension model (global or own, enabled by id, gone ids kept) so there's nothing new to learn. Amends "core features are extensions" for this one feature. |
 | **Skills reach the model by progressive disclosure: an index in the system prompt and a core `load_skill` tool** | Every enabled skill's full prompt in the system prompt; a Lua extension delivering them | Skills can be long; a description per skill keeps every request small, and the model pulls in the rest when a task needs it (the Agent Skills approach). `load_skill` is the one tool the core runs itself; it goes through the same hooks as extension tools, and its name can't clash with theirs (`<extension>__<tool>`). |
-| **A skill's recommended extensions are a warning, not a requirement** | Required extensions that enable themselves, or block the skill | Avoids hard links between skills and extensions while there's only a handful of each. The persona form says what's missing; runs don't change. |
+| **A skill's recommended extensions are a warning, not a requirement** | Required extensions that enable themselves, or block the skill | Avoids hard links between skills and extensions while there's only a handful of each. The agent form says what's missing; runs don't change. |
 | **A user's own skill replaces a global one with the same name** | Both, with prefixed names; refusing the duplicate | The model addresses skills by name, so two with one name can't both be offered. Users overriding a global skill with their own version is the useful reading. |
+| **Personas are called agents, and a set of them is just "agents"; the UI, code, schema, and APIs all say `agent`** (reverses "persona" and "crew") | Keeping `persona` in code and APIs with "crew" in the UI | "Agent" is what people call this; two private words for it made the product and the code harder to follow. `/api/personas` became `/api/agents` and API key policies took `default_agent`/`allowed_agents`; a migration renamed the tables, columns, stored JSON, and `ctx.persona`/`persona_id` in extension scripts. |
 
 ## Open questions
 
 1. **Hooks on the stateless surface.** Should a minimal subset (e.g. `before_model_request`) run
-   on `/v1/*` eventually, or does that surface stay a pure persona proxy forever?
+   on `/v1/*` eventually, or does that surface stay a pure agent proxy forever?
 2. ~~**Hook API shape.**~~ Decided: one function per hook (now a field of the script's table).
    Remote extensions get translated to a generic `{hook, payload}` message at the protocol
    boundary.
@@ -957,5 +954,5 @@ Add an entry whenever a decision is made or reversed.
    does the pipeline checkpoint it along with steps?
 5. **Ordering and conflicts.** Extensions run in name order. Is that enough, or do extensions
    need a priority, or to declare dependencies on each other?
-6. **Persona model validation cache.** ~~How long to cache upstream `/v1/models`~~ (60 s), and
-   should personas whose model disappears be flagged?
+6. **Agent model validation cache.** ~~How long to cache upstream `/v1/models`~~ (60 s), and
+   should agents whose model disappears be flagged?

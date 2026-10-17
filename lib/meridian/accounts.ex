@@ -6,7 +6,7 @@ defmodule Meridian.Accounts do
 
   alias Meridian.Accounts.{ApiKey, User}
   alias Meridian.OIDC
-  alias Meridian.Personas
+  alias Meridian.Agents
   alias Meridian.Repo
 
   # last_used_at is only written when it is older than this, to avoid a write per request.
@@ -25,34 +25,34 @@ defmodule Meridian.Accounts do
   def change_user(%User{} = user, attrs \\ %{}), do: User.changeset(user, attrs)
 
   @doc """
-  Creates a user together with their default persona.
+  Creates a user together with their default agent.
 
-  `persona_attrs` are the default persona's attributes (at least `"model"`); slug and name
-  default to `"default"` / `"Default"`. See `Meridian.Personas.create_persona/3` for `opts`.
-  Returns `{:error, :user, changeset}` or `{:error, :persona, changeset}` on failure.
+  `agent_attrs` are the default agent's attributes (at least `"model"`); slug and name
+  default to `"default"` / `"Default"`. See `Meridian.Agents.create_agent/3` for `opts`.
+  Returns `{:error, :user, changeset}` or `{:error, :agent, changeset}` on failure.
   """
-  def create_user(user_attrs, persona_attrs, opts \\ []) do
+  def create_user(user_attrs, agent_attrs, opts \\ []) do
     user_changeset = User.changeset(%User{}, user_attrs)
 
-    persona_attrs =
-      Map.merge(%{"slug" => "default", "name" => "Default"}, stringify_keys(persona_attrs))
+    agent_attrs =
+      Map.merge(%{"slug" => "default", "name" => "Default"}, stringify_keys(agent_attrs))
 
-    persona_changeset =
-      Personas.Persona.changeset(%Personas.Persona{is_default: true}, persona_attrs)
-      |> Personas.validate_model(opts)
+    agent_changeset =
+      Agents.Agent.changeset(%Agents.Agent{is_default: true}, agent_attrs)
+      |> Agents.validate_model(opts)
 
     cond do
       not user_changeset.valid? ->
         {:error, :user, %{user_changeset | action: :insert}}
 
-      not persona_changeset.valid? ->
-        {:error, :persona, %{persona_changeset | action: :insert}}
+      not agent_changeset.valid? ->
+        {:error, :agent, %{agent_changeset | action: :insert}}
 
       true ->
         Repo.transact(fn ->
           with {:ok, user} <- Repo.insert(user_changeset),
-               {:ok, _persona} <-
-                 persona_changeset
+               {:ok, _agent} <-
+                 agent_changeset
                  |> Ecto.Changeset.put_change(:user_id, user.id)
                  |> Repo.insert() do
             {:ok, user}
@@ -61,7 +61,7 @@ defmodule Meridian.Accounts do
         |> case do
           {:ok, user} -> {:ok, user}
           {:error, %Ecto.Changeset{data: %User{}} = changeset} -> {:error, :user, changeset}
-          {:error, changeset} -> {:error, :persona, changeset}
+          {:error, changeset} -> {:error, :agent, changeset}
         end
     end
   end
@@ -70,7 +70,7 @@ defmodule Meridian.Accounts do
     user |> User.changeset(attrs) |> Repo.update()
   end
 
-  @doc "Deletes a user along with their API keys and personas."
+  @doc "Deletes a user along with their API keys and agents."
   def delete_user(%User{} = user), do: Repo.delete(user)
 
   ## API keys

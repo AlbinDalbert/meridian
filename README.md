@@ -4,10 +4,10 @@ A self-hostable agent layer for any OpenAI-compatible inference endpoint.
 
 Meridian sits between your clients and a model endpoint (llama.cpp, LiteLLM, vLLM, a hosted
 provider, ...). It looks like an inference endpoint to clients, but your API key carries *you*:
-your personas, your threads, and whatever extensions add on top.
+your agents, your threads, and whatever extensions add on top.
 
-- **Stateless `/v1/*`**: an OpenAI-compatible, persona-aware proxy. Point any OpenAI client at
-  it and pick a persona as the model.
+- **Stateless `/v1/*`**: an OpenAI-compatible, agent-aware proxy. Point any OpenAI client at
+  it and pick an agent as the model.
 - **Stateful `/api/*` + WebSocket**: server-side threads and durable runs. A response keeps
   generating if the client disconnects, and clients can resume the event stream from where they
   left off.
@@ -38,8 +38,8 @@ mix phx.server
 ```
 
 Then open `http://localhost:4000/admin`, log in with the token, create a user (this also creates
-their `meridian/default` persona), and mint an API key. Point any OpenAI client at
-`http://localhost:4000/v1` with that key and pick a persona as the model.
+their `meridian/default` agent), and mint an API key. Point any OpenAI client at
+`http://localhost:4000/v1` with that key and pick an agent as the model.
 
 The native API keeps the conversation on the server. A reply keeps generating if the client
 goes away; reconnect to the event stream to pick up where you left off:
@@ -84,8 +84,8 @@ get in if the provider says your email is verified and it's in `ADMIN_EMAILS`. R
 `https://<PHX_HOST>/admin/auth/callback`. `ADMIN_TOKEN` can stay set as a fallback for when the
 provider is down, or be left unset.
 
-**Your own personas (`/me`).** On whenever the client is set. Any Meridian user can sign in at
-`https://<PHX_HOST>/me` and create, edit, and delete their own personas (system prompt, model,
+**Your own agents (`/me`).** On whenever the client is set. Any Meridian user can sign in at
+`https://<PHX_HOST>/me` and create, edit, and delete their own agents (system prompt, model,
 params, extensions) and pick their default. It has nothing to do with the admin console: its
 own session, no `ADMIN_EMAILS`, and only your own things. Users are linked by email as below.
 Redirect URI: `https://<PHX_HOST>/me/auth/callback`.
@@ -93,7 +93,7 @@ Redirect URI: `https://<PHX_HOST>/me/auth/callback`.
 **Access requests.** With `/me` on, `https://<PHX_HOST>/me/request` is a public page where
 anyone can leave their email (and a name) to ask to be added. Send it to friends; their
 requests show up under Requests in the admin console, where Accept creates their user (with a
-default persona on the model you pick there), Snooze puts it aside for later, and Reject turns
+default agent on the model you pick there), Snooze puts it aside for later, and Reject turns
 it down. Once accepted, they sign in with that email.
 
 **Browser apps** (e.g. [xebec](../xebec)). On whenever the client is set. Meridian runs the
@@ -120,7 +120,7 @@ itself (with the provider's SDK, using PKCE) and sends the access token as
 (RS256, keys from the provider's JWKS), issuer, audience, and expiry. The first time someone
 signs in, they are linked to the Meridian user with the same email (fetched from the provider's
 userinfo endpoint, so request the `openid email` scopes). There is no signup: create the user
-in the admin console first. Signed-in users can use all of their personas. API keys keep
+in the admin console first. Signed-in users can use all of their agents. API keys keep
 working, and are still the way in for generic OpenAI clients.
 
 With WorkOS:
@@ -134,8 +134,8 @@ With WorkOS:
 3. For clients that run the login themselves, create a first-party application each (public,
    with the client's own redirect URI) and add its client id to `OIDC_AUDIENCES`.
 
-Other endpoints: `GET /api/personas` (the personas the caller may use, as `{id, name, model,
-default}`; `id` is what threads take as `persona`), `GET/PATCH/DELETE /api/threads/:id`, `GET /api/runs/:id`, and
+Other endpoints: `GET /api/agents` (the agents the caller may use, as `{id, name, model,
+default}`; `id` is what threads take as `agent`), `GET/PATCH/DELETE /api/threads/:id`, `GET /api/runs/:id`, and
 `POST /api/runs/:id/cancel`. The admin console shows how Meridian is used (per user:
 threads, messages, runs, tokens; per run: status, timings, usage, and a live log of its events
 by type), never what anyone said.

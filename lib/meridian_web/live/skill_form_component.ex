@@ -72,7 +72,7 @@ defmodule MeridianWeb.SkillFormComponent do
           type="checkgroup"
           label="Works best with"
           options={@extension_options}
-          hint="Extensions the skill relies on. A persona with the skill but without one of these gets a warning; nothing stops it."
+          hint="Extensions the skill relies on. An agent with the skill but without one of these gets a warning; nothing stops it."
         />
         <div class="form-actions">
           <.button phx-disable-with="Saving...">Save</.button>
@@ -83,7 +83,7 @@ defmodule MeridianWeb.SkillFormComponent do
             class="link danger push-right"
             phx-click="delete"
             phx-target={@myself}
-            data-confirm={"Delete #{@skill.name}? Personas that use it stop getting it."}
+            data-confirm={"Delete #{@skill.name}? Agents that use it stop getting it."}
           >
             Delete
           </button>

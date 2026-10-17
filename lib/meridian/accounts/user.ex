@@ -21,7 +21,7 @@ defmodule Meridian.Accounts.User do
     field :oidc_subject, :string
 
     has_many :api_keys, Meridian.Accounts.ApiKey
-    has_many :personas, Meridian.Personas.Persona
+    has_many :agents, Meridian.Agents.Agent
 
     timestamps()
   end

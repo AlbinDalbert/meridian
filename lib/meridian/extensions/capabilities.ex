@@ -8,13 +8,13 @@ defmodule Meridian.Extensions.Capabilities do
 
   Functions that can fail return `nil` and an error message, Lua style.
 
-    * `meridian.threads.get(id)` - a thread (`id`, `title`, `persona_id`, `created_at`), or nil
+    * `meridian.threads.get(id)` - a thread (`id`, `title`, `agent_id`, `created_at`), or nil
     * `meridian.threads.messages(id)` - a thread's messages, oldest first (`id`, `role`,
       `text`, `created_at`), or nil
     * `meridian.threads.set_title(id, title, opts)` - sets a thread's title; with
       `{only_if_untitled = true}` a title that's already set is left alone. Returns true
     * `meridian.model.complete(request)` - a non-streaming chat completions request
-      (`messages` required; `model` defaults to the persona's). Returns the reply's text and
+      (`messages` required; `model` defaults to the agent's). Returns the reply's text and
       the whole response
     * `meridian.jobs.enqueue(name, args, opts)` - runs `M.jobs[name](args, ctx)` in the
       background, with this call's context. `opts.unique`: a key; while a job with the same
@@ -118,7 +118,7 @@ defmodule Meridian.Extensions.Capabilities do
     %{
       "id" => thread.id,
       "title" => thread.title,
-      "persona_id" => thread.persona_id,
+      "agent_id" => thread.agent_id,
       "created_at" => DateTime.to_iso8601(thread.inserted_at)
     }
   end
@@ -135,7 +135,7 @@ defmodule Meridian.Extensions.Capabilities do
   ## Models
 
   defp complete([%{} = request | _], call) do
-    request = Map.put_new(request, "model", call.ctx.persona.model)
+    request = Map.put_new(request, "model", call.ctx.agent.model)
 
     with {:ok, response} <- Upstream.complete(request),
          %{"choices" => [%{"message" => %{"content" => text}} | _]} when is_binary(text) <-

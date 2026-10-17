@@ -1,9 +1,9 @@
 defmodule MeridianWeb.Admin.UserLive.Show do
   use MeridianWeb, :live_view
 
-  alias Meridian.{Accounts, Personas, Threads}
+  alias Meridian.{Accounts, Agents, Threads}
   alias Meridian.Accounts.ApiKey.Policy
-  alias Meridian.Personas.Persona
+  alias Meridian.Agents.Agent
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -19,7 +19,7 @@ defmodule MeridianWeb.Admin.UserLive.Show do
     user = socket.assigns.user
 
     assign(socket,
-      personas: Personas.list_personas(user),
+      agents: Agents.list_agents(user),
       api_keys: Accounts.list_api_keys(user),
       activity: Threads.activity(user)
     )
@@ -38,7 +38,7 @@ defmodule MeridianWeb.Admin.UserLive.Show do
             type="button"
             variant="danger"
             phx-click="delete_user"
-            data-confirm={"Delete #{@user.name} along with their crew and API keys?"}
+            data-confirm={"Delete #{@user.name} along with their agents and API keys?"}
           >
             Delete
           </.button>
@@ -58,43 +58,43 @@ defmodule MeridianWeb.Admin.UserLive.Show do
       </p>
 
       <.header level={2}>
-        Crew
-        <:subtitle>Clients pick a persona by using its model id.</:subtitle>
+        Agents
+        <:subtitle>Clients pick an agent by using its model id.</:subtitle>
         <:actions>
-          <.link navigate={~p"/admin/users/#{@user}/personas/new"} class="btn btn-secondary">
-            New persona
+          <.link navigate={~p"/admin/users/#{@user}/agents/new"} class="btn btn-secondary">
+            New agent
           </.link>
         </:actions>
       </.header>
-      <.table id="personas" rows={@personas}>
-        <:col :let={persona} label="Model id">
-          <code>{Persona.model_id(persona)}</code>
-          <span :if={persona.is_default} class="badge">default</span>
+      <.table id="agents" rows={@agents}>
+        <:col :let={agent} label="Model id">
+          <code>{Agent.model_id(agent)}</code>
+          <span :if={agent.is_default} class="badge">default</span>
         </:col>
-        <:col :let={persona} label="Name">{persona.name}</:col>
-        <:col :let={persona} label="Upstream model"><code>{persona.model}</code></:col>
-        <:action :let={persona}>
-          <.link navigate={~p"/admin/personas/#{persona}/edit"}>Edit</.link>
+        <:col :let={agent} label="Name">{agent.name}</:col>
+        <:col :let={agent} label="Upstream model"><code>{agent.model}</code></:col>
+        <:action :let={agent}>
+          <.link navigate={~p"/admin/agents/#{agent}/edit"}>Edit</.link>
         </:action>
-        <:action :let={persona}>
+        <:action :let={agent}>
           <button
-            :if={not persona.is_default}
+            :if={not agent.is_default}
             type="button"
             class="link"
             phx-click="make_default"
-            phx-value-id={persona.id}
+            phx-value-id={agent.id}
           >
             Make default
           </button>
         </:action>
-        <:action :let={persona}>
+        <:action :let={agent}>
           <button
-            :if={not persona.is_default}
+            :if={not agent.is_default}
             type="button"
             class="link danger"
-            phx-click="delete_persona"
-            phx-value-id={persona.id}
-            data-confirm={"Delete persona #{persona.slug}?"}
+            phx-click="delete_agent"
+            phx-value-id={agent.id}
+            data-confirm={"Delete agent #{agent.slug}?"}
           >
             Delete
           </button>
@@ -158,8 +158,8 @@ defmodule MeridianWeb.Admin.UserLive.Show do
     """
   end
 
-  defp policy_summary(%Policy{default_persona: default, allowed_personas: allowed}) do
-    allowed_text = if allowed == [], do: "the whole crew", else: Enum.join(allowed, ", ")
+  defp policy_summary(%Policy{default_agent: default, allowed_agents: allowed}) do
+    allowed_text = if allowed == [], do: "all agents", else: Enum.join(allowed, ", ")
     default_text = if default, do: "; default #{default}", else: ""
     allowed_text <> default_text
   end
@@ -180,18 +180,18 @@ defmodule MeridianWeb.Admin.UserLive.Show do
   end
 
   def handle_event("make_default", %{"id" => id}, socket) do
-    {:ok, _} = id |> user_persona!(socket) |> Personas.make_default()
+    {:ok, _} = id |> user_agent!(socket) |> Agents.make_default()
     {:noreply, load_children(socket)}
   end
 
-  def handle_event("delete_persona", %{"id" => id}, socket) do
+  def handle_event("delete_agent", %{"id" => id}, socket) do
     socket =
-      case id |> user_persona!(socket) |> Personas.delete_persona() do
+      case id |> user_agent!(socket) |> Agents.delete_agent() do
         {:ok, _} ->
-          put_flash(socket, :info, "Persona deleted.")
+          put_flash(socket, :info, "Agent deleted.")
 
-        {:error, :default_persona} ->
-          put_flash(socket, :error, "The default persona can't be deleted.")
+        {:error, :default_agent} ->
+          put_flash(socket, :error, "The default agent can't be deleted.")
       end
 
     {:noreply, load_children(socket)}
@@ -205,5 +205,5 @@ defmodule MeridianWeb.Admin.UserLive.Show do
     {:noreply, socket |> put_flash(:info, "API key revoked.") |> load_children()}
   end
 
-  defp user_persona!(id, socket), do: Personas.get_persona!(socket.assigns.user, id)
+  defp user_agent!(id, socket), do: Agents.get_agent!(socket.assigns.user, id)
 end

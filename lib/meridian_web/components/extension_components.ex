@@ -104,12 +104,12 @@ defmodule MeridianWeb.ExtensionComponents do
         <dd>A one-line description, shown in lists.</dd>
         <dt><code>settings</code></dt>
         <dd>
-          Settings and their defaults. Each persona that turns the extension on can change them;
+          Settings and their defaults. Each agent that turns the extension on can change them;
           a hook gets them in <code>ctx.settings</code>. Lua tables can't hold <code>nil</code>,
           so use <code>false</code> or <code>""</code> for "not set".
         </dd>
         <dt><code>validate(settings)</code></dt>
-        <dd>Optional. Return an error message to refuse a persona's settings.</dd>
+        <dd>Optional. Return an error message to refuse an agent's settings.</dd>
         <dt><code>jobs</code></dt>
         <dd>
           Functions <code>(args, ctx)</code> run in the background, queued with
@@ -131,7 +131,7 @@ defmodule MeridianWeb.ExtensionComponents do
       <p>
         Define a function to subscribe to a hook. Each gets its value (if any) and
         <code>ctx</code>: <code>run_id</code>, <code>thread_id</code>, <code>user_id</code>,
-        <code>settings</code>, and <code>persona</code> (<code>id</code>, <code>slug</code>,
+        <code>settings</code>, and <code>agent</code> (<code>id</code>, <code>slug</code>,
         <code>name</code>, <code>model</code>). Hooks that change a value return it; returning
         nothing leaves it as it was. A hook that fails, or takes over 5 seconds, is skipped.
       </p>
@@ -181,7 +181,7 @@ defmodule MeridianWeb.ExtensionComponents do
           <code>error</code>. Queue a job for slow work.
         </dd>
         <dt><code>thread_created(thread, ctx)</code>, <code>thread_deleted(thread, ctx)</code></dt>
-        <dd><code>id</code>, <code>title</code>, <code>persona_id</code>.</dd>
+        <dd><code>id</code>, <code>title</code>, <code>agent_id</code>.</dd>
       </dl>
 
       <h3>The <code>meridian</code> table</h3>
@@ -191,14 +191,14 @@ defmodule MeridianWeb.ExtensionComponents do
       </p>
       <dl class="details">
         <dt><code>meridian.threads.get(id)</code></dt>
-        <dd>A thread: <code>id</code>, <code>title</code>, <code>persona_id</code>, <code>created_at</code>.</dd>
+        <dd>A thread: <code>id</code>, <code>title</code>, <code>agent_id</code>, <code>created_at</code>.</dd>
         <dt><code>meridian.threads.messages(id)</code></dt>
         <dd>Its messages, oldest first: <code>id</code>, <code>role</code>, <code>text</code>, <code>created_at</code>.</dd>
         <dt><code>{"meridian.threads.set_title(id, title, {only_if_untitled = true})"}</code></dt>
         <dd>Sets a thread's title.</dd>
         <dt><code>meridian.model.complete(request)</code></dt>
         <dd>
-          A chat completion (<code>messages</code>; <code>model</code> defaults to the persona's).
+          A chat completion (<code>messages</code>; <code>model</code> defaults to the agent's).
           Returns the reply's text and the whole response.
         </dd>
         <dt><code>meridian.jobs.enqueue(name, args, opts)</code></dt>

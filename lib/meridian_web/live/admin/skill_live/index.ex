@@ -1,15 +1,15 @@
 defmodule MeridianWeb.Admin.SkillLive.Index do
   use MeridianWeb, :live_view
 
-  alias Meridian.{Personas, Skills}
+  alias Meridian.{Agents, Skills}
 
   @impl true
   def mount(_params, _session, socket) do
-    counts = Personas.count_by_skill()
+    counts = Agents.count_by_skill()
 
     skills =
       Enum.map(Skills.list_skills(), fn skill ->
-        %{skill: skill, personas: Map.get(counts, skill.id, 0)}
+        %{skill: skill, agents: Map.get(counts, skill.id, 0)}
       end)
 
     {:ok, assign(socket, page_title: "Skills", skills: skills)}
@@ -22,7 +22,7 @@ defmodule MeridianWeb.Admin.SkillLive.Index do
       <.header>
         Skills
         <:subtitle>
-          Instructions for kinds of tasks. Personas that turn a skill on tell the model about it,
+          Instructions for kinds of tasks. Agents that turn a skill on tell the model about it,
           and the model loads it when a task calls for it. Global ones are for everyone; users can
           also write their own.
         </:subtitle>
@@ -42,12 +42,12 @@ defmodule MeridianWeb.Admin.SkillLive.Index do
             {row.skill.user.name}
           </.link>
         </:col>
-        <:col :let={row} label="Enabled on">{personas_text(row.personas)}</:col>
+        <:col :let={row} label="Enabled on">{agents_text(row.agents)}</:col>
       </.table>
     </Layouts.app>
     """
   end
 
-  defp personas_text(1), do: "1 persona"
-  defp personas_text(count), do: "#{count} personas"
+  defp agents_text(1), do: "1 agent"
+  defp agents_text(count), do: "#{count} agents"
 end

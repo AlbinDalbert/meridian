@@ -4,54 +4,54 @@ defmodule Meridian.ProxyTest do
   import Meridian.Fixtures
 
   alias Meridian.Accounts.ApiKey.Policy
-  alias Meridian.{Personas, Proxy}
-  alias Meridian.Personas.Persona
+  alias Meridian.{Agents, Proxy}
+  alias Meridian.Agents.Agent
 
   setup do
     user = user_fixture()
-    coder = persona_fixture(user, %{"slug" => "coder"})
-    %{user: user, default: Personas.get_default_persona(user), coder: coder}
+    coder = agent_fixture(user, %{"slug" => "coder"})
+    %{user: user, default: Agents.get_default_agent(user), coder: coder}
   end
 
   describe "resolve_model/3" do
-    test "resolves meridian/<slug> to the persona", %{user: user, coder: coder} do
-      assert {:ok, {:persona, %Persona{id: id}}} =
+    test "resolves meridian/<slug> to the agent", %{user: user, coder: coder} do
+      assert {:ok, {:agent, %Agent{id: id}}} =
                Proxy.resolve_model(user, %Policy{}, "meridian/coder")
 
       assert id == coder.id
     end
 
-    test "unknown meridian/ personas are not found", %{user: user} do
+    test "unknown meridian/ agents are not found", %{user: user} do
       assert {:error, :model_not_found} = Proxy.resolve_model(user, %Policy{}, "meridian/nope")
     end
 
-    test "other models fall back to the user's default persona", %{user: user, default: default} do
+    test "other models fall back to the user's default agent", %{user: user, default: default} do
       for model <- ["gpt-4o", nil] do
-        assert {:ok, {:persona, %Persona{id: id}}} = Proxy.resolve_model(user, %Policy{}, model)
+        assert {:ok, {:agent, %Agent{id: id}}} = Proxy.resolve_model(user, %Policy{}, model)
         assert id == default.id
       end
     end
 
-    test "the policy's default persona takes precedence", %{user: user, coder: coder} do
-      policy = %Policy{default_persona: "coder"}
-      assert {:ok, {:persona, %Persona{id: id}}} = Proxy.resolve_model(user, policy, "gpt-4o")
+    test "the policy's default agent takes precedence", %{user: user, coder: coder} do
+      policy = %Policy{default_agent: "coder"}
+      assert {:ok, {:agent, %Agent{id: id}}} = Proxy.resolve_model(user, policy, "gpt-4o")
       assert id == coder.id
     end
 
-    test "the policy restricts personas", %{user: user, coder: coder} do
-      policy = %Policy{allowed_personas: ["coder"]}
+    test "the policy restricts agents", %{user: user, coder: coder} do
+      policy = %Policy{allowed_agents: ["coder"]}
 
       assert {:error, :model_not_found} = Proxy.resolve_model(user, policy, "meridian/default")
-      # The user's default persona isn't allowed either.
+      # The user's default agent isn't allowed either.
       assert {:error, :model_not_found} = Proxy.resolve_model(user, policy, "gpt-4o")
 
-      assert {:ok, {:persona, %Persona{id: id}}} =
+      assert {:ok, {:agent, %Agent{id: id}}} =
                Proxy.resolve_model(user, policy, "meridian/coder")
 
       assert id == coder.id
     end
 
-    test "personas of other users are not found", %{coder: _coder} do
+    test "agents of other users are not found", %{coder: _coder} do
       other = user_fixture()
       assert {:error, :model_not_found} = Proxy.resolve_model(other, %Policy{}, "meridian/coder")
     end
@@ -60,7 +60,7 @@ defmodule Meridian.ProxyTest do
   describe "build_request/2" do
     setup %{coder: coder} do
       {:ok, coder} =
-        Personas.update_persona(
+        Agents.update_agent(
           coder,
           %{
             "model" => "qwen",
@@ -80,7 +80,7 @@ defmodule Meridian.ProxyTest do
         "messages" => [%{"role" => "user", "content" => "hi"}]
       }
 
-      assert Proxy.build_request({:persona, coder}, body) == %{
+      assert Proxy.build_request({:agent, coder}, body) == %{
                "model" => "qwen",
                "temperature" => 0.9,
                "max_tokens" => 100,
@@ -103,7 +103,7 @@ defmodule Meridian.ProxyTest do
                  _
                ]
              } =
-               Proxy.build_request({:persona, coder}, %{"messages" => messages})
+               Proxy.build_request({:agent, coder}, %{"messages" => messages})
 
       parts = [%{"type" => "text", "text" => "Use tools."}]
 
@@ -112,7 +112,7 @@ defmodule Meridian.ProxyTest do
                  %{"role" => "developer", "content" => [%{"text" => "You are terse."}, _]}
                ]
              } =
-               Proxy.build_request({:persona, coder}, %{
+               Proxy.build_request({:agent, coder}, %{
                  "messages" => [%{"role" => "developer", "content" => parts}]
                })
     end
@@ -121,7 +121,7 @@ defmodule Meridian.ProxyTest do
       messages = [%{"role" => "user", "content" => "hi"}]
 
       assert %{"messages" => ^messages} =
-               Proxy.build_request({:persona, default}, %{"messages" => messages})
+               Proxy.build_request({:agent, default}, %{"messages" => messages})
     end
 
     test "passes raw upstream models through" do

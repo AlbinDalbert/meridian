@@ -110,16 +110,16 @@ defmodule Meridian.AccessRequests do
   end
 
   @doc """
-  Accepts a request: creates the user, with a default persona from `persona_attrs` (at least
+  Accepts a request: creates the user, with a default agent from `agent_attrs` (at least
   `"model"`), and deletes the request. The user's name is the one they gave, or the start of
   their email. Takes the same options and returns the same errors as
   `Meridian.Accounts.create_user/3`.
   """
-  def accept(%AccessRequest{} = request, persona_attrs, opts \\ []) do
+  def accept(%AccessRequest{} = request, agent_attrs, opts \\ []) do
     user_attrs = %{"email" => request.email, "name" => request.name || email_name(request.email)}
 
     Repo.transact(fn ->
-      case Accounts.create_user(user_attrs, persona_attrs, opts) do
+      case Accounts.create_user(user_attrs, agent_attrs, opts) do
         {:ok, user} ->
           Repo.delete!(request)
           {:ok, user}

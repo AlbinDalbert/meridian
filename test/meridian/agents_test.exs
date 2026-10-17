@@ -1,9 +1,9 @@
-defmodule Meridian.PersonasTest do
+defmodule Meridian.AgentsTest do
   use Meridian.DataCase, async: true
 
   import Meridian.Fixtures
 
-  alias Meridian.Personas
+  alias Meridian.Agents
 
   setup do
     %{user: user_fixture()}
@@ -11,7 +11,7 @@ defmodule Meridian.PersonasTest do
 
   test "slug, name, and model can't be blank, even when trimmed to nothing", %{user: user} do
     assert {:error, changeset} =
-             Personas.create_persona(user, %{"slug" => " ", "name" => "", "model" => "  "},
+             Agents.create_agent(user, %{"slug" => " ", "name" => "", "model" => "  "},
                force: true
              )
 
@@ -19,25 +19,25 @@ defmodule Meridian.PersonasTest do
     for field <- [:slug, :name, :model], do: assert("can't be blank" in errors[field])
   end
 
-  describe "create_persona/3 model validation" do
+  describe "create_agent/3 model validation" do
     test "accepts a model the upstream lists", %{user: user} do
       stub_upstream_models(["m1", "m2"])
 
-      assert {:ok, persona} =
-               Personas.create_persona(user, %{
+      assert {:ok, agent} =
+               Agents.create_agent(user, %{
                  "slug" => "coder",
                  "name" => "Coder",
                  "model" => "m2"
                })
 
-      assert persona.model == "m2"
+      assert agent.model == "m2"
     end
 
     test "rejects a model the upstream doesn't list", %{user: user} do
       stub_upstream_models(["m1"])
 
       assert {:error, changeset} =
-               Personas.create_persona(user, %{
+               Agents.create_agent(user, %{
                  "slug" => "coder",
                  "name" => "Coder",
                  "model" => "m2"
@@ -50,7 +50,7 @@ defmodule Meridian.PersonasTest do
       stub_upstream_down()
 
       assert {:error, changeset} =
-               Personas.create_persona(user, %{
+               Agents.create_agent(user, %{
                  "slug" => "coder",
                  "name" => "Coder",
                  "model" => "m2"
@@ -62,8 +62,8 @@ defmodule Meridian.PersonasTest do
     test "force: true skips validation", %{user: user} do
       stub_upstream_down()
 
-      assert {:ok, _persona} =
-               Personas.create_persona(
+      assert {:ok, _agent} =
+               Agents.create_agent(
                  user,
                  %{"slug" => "coder", "name" => "Coder", "model" => "m2"},
                  force: true
@@ -71,24 +71,24 @@ defmodule Meridian.PersonasTest do
     end
 
     test "updates only validate a changed model", %{user: user} do
-      persona = persona_fixture(user, %{"model" => "unlisted"})
+      agent = agent_fixture(user, %{"model" => "unlisted"})
       stub_upstream_down()
 
-      assert {:ok, persona} = Personas.update_persona(persona, %{"name" => "Renamed"})
-      assert persona.name == "Renamed"
+      assert {:ok, agent} = Agents.update_agent(agent, %{"name" => "Renamed"})
+      assert agent.name == "Renamed"
     end
   end
 
   test "slugs are validated and unique per user", %{user: user} do
     assert {:error, changeset} =
-             Personas.create_persona(user, %{"slug" => "Bad Slug", "name" => "x", "model" => "m"},
+             Agents.create_agent(user, %{"slug" => "Bad Slug", "name" => "x", "model" => "m"},
                force: true
              )
 
     assert %{slug: [_]} = errors_on(changeset)
 
     assert {:error, changeset} =
-             Personas.create_persona(user, %{"slug" => "default", "name" => "x", "model" => "m"},
+             Agents.create_agent(user, %{"slug" => "default", "name" => "x", "model" => "m"},
                force: true
              )
 
@@ -97,19 +97,19 @@ defmodule Meridian.PersonasTest do
     other = user_fixture()
 
     assert {:ok, _} =
-             Personas.create_persona(other, %{"slug" => "coder", "name" => "x", "model" => "m"},
+             Agents.create_agent(other, %{"slug" => "coder", "name" => "x", "model" => "m"},
                force: true
              )
 
     assert {:ok, _} =
-             Personas.create_persona(user, %{"slug" => "coder", "name" => "x", "model" => "m"},
+             Agents.create_agent(user, %{"slug" => "coder", "name" => "x", "model" => "m"},
                force: true
              )
   end
 
   test "params must not override model or messages", %{user: user} do
     assert {:error, changeset} =
-             Personas.create_persona(
+             Agents.create_agent(
                user,
                %{"slug" => "p", "name" => "x", "model" => "m", "params" => %{"model" => "other"}},
                force: true
@@ -119,18 +119,18 @@ defmodule Meridian.PersonasTest do
   end
 
   test "make_default/1 moves the default", %{user: user} do
-    old_default = Personas.get_default_persona(user)
-    persona = persona_fixture(user)
+    old_default = Agents.get_default_agent(user)
+    agent = agent_fixture(user)
 
-    assert {:ok, _} = Personas.make_default(persona)
-    assert Personas.get_default_persona(user).id == persona.id
-    refute Personas.get_persona!(old_default.id).is_default
+    assert {:ok, _} = Agents.make_default(agent)
+    assert Agents.get_default_agent(user).id == agent.id
+    refute Agents.get_agent!(old_default.id).is_default
   end
 
-  test "the default persona can't be deleted", %{user: user} do
-    assert {:error, :default_persona} =
-             user |> Personas.get_default_persona() |> Personas.delete_persona()
+  test "the default agent can't be deleted", %{user: user} do
+    assert {:error, :default_agent} =
+             user |> Agents.get_default_agent() |> Agents.delete_agent()
 
-    assert {:ok, _} = user |> persona_fixture() |> Personas.delete_persona()
+    assert {:ok, _} = user |> agent_fixture() |> Agents.delete_agent()
   end
 end

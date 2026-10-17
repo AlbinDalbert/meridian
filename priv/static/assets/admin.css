@@ -307,11 +307,11 @@ details summary { cursor: pointer; margin-bottom: 0.5rem; }
 .request-name { color: var(--text); }
 .rejected { margin-top: 2.5rem; }
 
-/* A description next to a label, e.g. an extension's, in the persona form. */
+/* A description next to a label, e.g. an extension's, in the agent form. */
 .inline-hint { color: var(--muted); font-weight: normal; }
 .inline-hint::before { content: "—"; margin: 0 0.5em; }
 
-/* The persona form's advanced settings, folded away. */
+/* The agent form's advanced settings, folded away. */
 details.advanced {
   margin: 0.5rem 0 0;
   border-top: 1px solid var(--border);

@@ -13,7 +13,7 @@ defmodule Meridian.Threads.Thread do
     field :title, :string
 
     belongs_to :user, Meridian.Accounts.User
-    belongs_to :persona, Meridian.Personas.Persona
+    belongs_to :agent, Meridian.Agents.Agent
 
     has_many :messages, Meridian.Threads.Message
     has_many :runs, Meridian.Runs.Run

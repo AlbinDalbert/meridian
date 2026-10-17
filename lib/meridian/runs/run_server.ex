@@ -4,7 +4,7 @@ defmodule Meridian.Runs.RunServer do
   registered in `Meridian.Runs.Registry` by run id.
 
   A run is a loop of steps. Each step builds the request from the thread's history and the
-  persona snapshot, streams the completion from the upstream, and either saves the reply (the
+  agent snapshot, streams the completion from the upstream, and either saves the reply (the
   run is done) or, if the model asked for tools, saves its message, runs the tools, saves their
   results, and starts the next step. The request runs in a separate process
   (`Meridian.Upstream.Stream`) that forwards the response here, and each tool call runs in its
@@ -31,7 +31,7 @@ defmodule Meridian.Runs.RunServer do
 
   require Logger
 
-  alias Meridian.{Extensions, Personas, Runs, Skills, Threads, Upstream}
+  alias Meridian.{Extensions, Agents, Runs, Skills, Threads, Upstream}
   alias Meridian.Extensions.Context
   alias Meridian.Runs.Run
   alias Meridian.Threads.Message
@@ -121,7 +121,7 @@ defmodule Meridian.Runs.RunServer do
           | run: run,
             seq: started.seq,
             ctx: ctx,
-            extensions: Extensions.enabled(ctx.persona)
+            extensions: Extensions.enabled(ctx.agent)
         }
 
         Extensions.notify(state.extensions, :run_start, [], ctx)
@@ -140,18 +140,17 @@ defmodule Meridian.Runs.RunServer do
     end
   end
 
-  # `before_run` decides what holds for the whole run: the persona's system prompt (as
+  # `before_run` decides what holds for the whole run: the agent's system prompt (as
   # sections, with the index of its skills), its params, and the tools (the enabled
   # extensions', and `load_skill`).
   defp configure(%{ctx: ctx, extensions: extensions} = state) do
-    persona = ctx.persona
-    skills = Skills.enabled(persona)
+    agent = ctx.agent
+    skills = Skills.enabled(agent)
     tool_set = Extensions.tool_set(extensions) ++ List.wrap(Skills.tool(skills))
 
     config = %{
-      system_prompt:
-        Enum.reject([persona.system_prompt, Skills.prompt_section(skills)], &is_nil/1),
-      params: persona.params,
+      system_prompt: Enum.reject([agent.system_prompt, Skills.prompt_section(skills)], &is_nil/1),
+      params: agent.params,
       tools: Enum.map(tool_set, & &1.definition)
     }
 
@@ -193,8 +192,8 @@ defmodule Meridian.Runs.RunServer do
       config.system_prompt |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join("\n\n")
 
     body =
-      %{ctx.persona | system_prompt: system_prompt, params: config.params}
-      |> Personas.apply_to_request(%{
+      %{ctx.agent | system_prompt: system_prompt, params: config.params}
+      |> Agents.apply_to_request(%{
         "messages" => messages,
         "stream" => true,
         "stream_options" => %{"include_usage" => true}

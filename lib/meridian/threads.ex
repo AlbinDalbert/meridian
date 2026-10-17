@@ -9,9 +9,9 @@ defmodule Meridian.Threads do
 
   alias Meridian.Accounts.ApiKey.Policy
   alias Meridian.Accounts.User
-  alias Meridian.{Extensions, Personas, Repo}
+  alias Meridian.{Extensions, Agents, Repo}
   alias Meridian.Extensions.Context
-  alias Meridian.Personas.Persona
+  alias Meridian.Agents.Agent
   alias Meridian.Runs.{Run, Worker}
   alias Meridian.Threads.{Message, Thread}
 
@@ -68,57 +68,57 @@ defmodule Meridian.Threads do
         where: t.user_id == ^user_id,
         order_by: [desc: t.updated_at],
         limit: ^page_size(opts[:limit]),
-        preload: :persona
+        preload: :agent
     )
   end
 
-  @doc "Gets one of `user`'s threads (persona preloaded), or nil."
+  @doc "Gets one of `user`'s threads (agent preloaded), or nil."
   def get_user_thread(%User{id: user_id}, id) do
     with {:ok, id} <- Ecto.UUID.cast(id) do
-      Repo.one(from t in Thread, where: t.id == ^id and t.user_id == ^user_id, preload: :persona)
+      Repo.one(from t in Thread, where: t.id == ^id and t.user_id == ^user_id, preload: :agent)
     else
       :error -> nil
     end
   end
 
-  def get_thread!(id), do: Thread |> Repo.get!(id) |> Repo.preload([:persona, :user])
+  def get_thread!(id), do: Thread |> Repo.get!(id) |> Repo.preload([:agent, :user])
 
   @doc """
-  Creates a thread for `user`. `attrs["persona"]` is a persona model id (`meridian/<slug>`) or
-  slug; without one the key's default persona is used (see
-  `Meridian.Personas.resolve_persona/3`).
+  Creates a thread for `user`. `attrs["agent"]` is an agent model id (`meridian/<slug>`) or
+  slug; without one the key's default agent is used (see
+  `Meridian.Agents.resolve_agent/3`).
   """
   def create_thread(%User{} = user, %Policy{} = policy, attrs) do
-    slug = persona_slug(attrs["persona"])
+    slug = agent_slug(attrs["agent"])
 
-    with {:ok, persona} <- Personas.resolve_persona(user, policy, slug),
+    with {:ok, agent} <- Agents.resolve_agent(user, policy, slug),
          {:ok, thread} <-
-           %Thread{user_id: user.id, persona_id: persona.id, persona: persona}
+           %Thread{user_id: user.id, agent_id: agent.id, agent: agent}
            |> Thread.changeset(attrs)
            |> Repo.insert() do
-      notify_extensions(:thread_created, thread, persona)
+      notify_extensions(:thread_created, thread, agent)
       {:ok, thread}
     end
   end
 
-  @doc "Updates a thread's title and, if `attrs[\"persona\"]` is given, its persona."
+  @doc "Updates a thread's title and, if `attrs[\"agent\"]` is given, its agent."
   def update_thread(%Thread{} = thread, %Policy{} = policy, attrs) do
-    persona =
-      case Map.fetch(attrs, "persona") do
-        {:ok, persona} when is_binary(persona) ->
-          Personas.resolve_persona(%User{id: thread.user_id}, policy, persona_slug(persona))
+    agent =
+      case Map.fetch(attrs, "agent") do
+        {:ok, agent} when is_binary(agent) ->
+          Agents.resolve_agent(%User{id: thread.user_id}, policy, agent_slug(agent))
 
         _ ->
-          {:ok, thread.persona}
+          {:ok, thread.agent}
       end
 
-    with {:ok, persona} <- persona,
+    with {:ok, agent} <- agent,
          {:ok, thread} <-
            thread
            |> Thread.changeset(attrs)
-           |> Ecto.Changeset.put_change(:persona_id, persona && persona.id)
+           |> Ecto.Changeset.put_change(:agent_id, agent && agent.id)
            |> Repo.update() do
-      {:ok, %{thread | persona: persona}}
+      {:ok, %{thread | agent: agent}}
     end
   end
 
@@ -149,24 +149,24 @@ defmodule Meridian.Threads do
        ) do
       {:error, :run_active}
     else
-      %{persona: persona} = thread = Repo.preload(thread, :persona)
+      %{agent: agent} = thread = Repo.preload(thread, :agent)
 
       with {:ok, thread} <- Repo.delete(thread) do
-        notify_extensions(:thread_deleted, thread, persona)
+        notify_extensions(:thread_deleted, thread, agent)
         {:ok, thread}
       end
     end
   end
 
-  # Thread hooks use the persona's current settings (there is no run to freeze them in).
+  # Thread hooks use the agent's current settings (there is no run to freeze them in).
   defp notify_extensions(_hook, _thread, nil), do: :ok
 
-  defp notify_extensions(hook, thread, persona) do
+  defp notify_extensions(hook, thread, agent) do
     Extensions.notify(
-      Extensions.enabled(persona),
+      Extensions.enabled(agent),
       hook,
       [thread],
-      Context.for_thread(thread, persona)
+      Context.for_thread(thread, agent)
     )
   end
 
@@ -217,25 +217,25 @@ defmodule Meridian.Threads do
   Adds a user message to a thread and starts a run to reply to it. Returns right away with
   `{:ok, message, run}`; the run executes in the background.
 
-  The run uses the thread's persona (or the key's default persona if the thread's was
+  The run uses the thread's agent (or the key's default agent if the thread's was
   deleted), frozen into the run. Fails with `{:error, :run_active}` if the thread already has
-  an active run, and `{:error, :persona_not_found}` if the key may not use the persona.
+  an active run, and `{:error, :agent_not_found}` if the key may not use the agent.
   """
   def send_message(%Thread{} = thread, %Policy{} = policy, attrs) do
-    slug = if thread.persona, do: thread.persona.slug
+    slug = if thread.agent, do: thread.agent.slug
 
-    with {:ok, persona} <- Personas.resolve_persona(%User{id: thread.user_id}, policy, slug),
-         {:ok, {message, run}} <- insert_message_and_run(thread, persona, attrs) do
+    with {:ok, agent} <- Agents.resolve_agent(%User{id: thread.user_id}, policy, slug),
+         {:ok, {message, run}} <- insert_message_and_run(thread, agent, attrs) do
       Meridian.Runs.broadcast_run(run)
       {:ok, message, run}
     end
   end
 
-  defp insert_message_and_run(thread, persona, attrs) do
+  defp insert_message_and_run(thread, agent, attrs) do
     Repo.transact(fn ->
       with {:ok, message} <-
              Repo.insert(Message.user_changeset(%Message{thread_id: thread.id}, attrs)),
-           {:ok, run} <- insert_run(thread, persona, message),
+           {:ok, run} <- insert_run(thread, agent, message),
            {:ok, _job} <- Oban.insert(Worker.new(%{run_id: run.id})) do
         Repo.update_all(from(t in Thread, where: t.id == ^thread.id),
           set: [updated_at: DateTime.utc_now()]
@@ -247,13 +247,13 @@ defmodule Meridian.Threads do
   end
 
   # The only way inserting a valid run fails is the one-active-run-per-thread index.
-  defp insert_run(thread, persona, message) do
+  defp insert_run(thread, agent, message) do
     %Run{}
     |> Run.create_changeset(%{
       thread_id: thread.id,
       user_message_id: message.id,
-      persona_snapshot: Persona.snapshot(persona),
-      model: persona.model
+      agent_snapshot: Agent.snapshot(agent),
+      model: agent.model
     })
     |> Repo.insert()
     |> case do
@@ -262,14 +262,14 @@ defmodule Meridian.Threads do
     end
   end
 
-  defp persona_slug(persona) when is_binary(persona) do
-    case Persona.slug_from_model_id(persona) do
+  defp agent_slug(agent) when is_binary(agent) do
+    case Agent.slug_from_model_id(agent) do
       {:ok, slug} -> slug
-      :error -> persona
+      :error -> agent
     end
   end
 
-  defp persona_slug(_persona), do: nil
+  defp agent_slug(_agent), do: nil
 
   defp page_size(nil), do: @default_page_size
   defp page_size(limit) when is_integer(limit), do: limit |> max(1) |> min(@max_page_size)

@@ -1,9 +1,9 @@
 defmodule MeridianWeb.Admin.UserLive.Form do
   use MeridianWeb, :live_view
 
-  alias Meridian.{Accounts, Personas, Upstream}
+  alias Meridian.{Accounts, Agents, Upstream}
   alias Meridian.Accounts.User
-  alias Meridian.Personas.Persona
+  alias Meridian.Agents.Agent
 
   @impl true
   def mount(params, _session, socket) do
@@ -14,7 +14,7 @@ defmodule MeridianWeb.Admin.UserLive.Form do
     socket
     |> assign(page_title: "New user", user: %User{}, force: false)
     |> assign(form: to_form(Accounts.change_user(%User{})))
-    |> assign(persona_form: to_form(Personas.change_persona(%Persona{}), as: :persona))
+    |> assign(agent_form: to_form(Agents.change_agent(%Agent{}), as: :agent))
     |> assign_upstream_models()
   end
 
@@ -41,7 +41,7 @@ defmodule MeridianWeb.Admin.UserLive.Form do
       <.header>
         {@page_title}
         <:subtitle :if={@live_action == :new}>
-          A default persona (<code>meridian/default</code>) is created along with the user.
+          A default agent (<code>meridian/default</code>) is created along with the user.
         </:subtitle>
       </.header>
 
@@ -50,9 +50,9 @@ defmodule MeridianWeb.Admin.UserLive.Form do
         <.input field={@form[:email]} type="email" label="Email" required />
 
         <%= if @live_action == :new do %>
-          <h2>Default persona</h2>
+          <h2>Default agent</h2>
           <.input
-            field={@persona_form[:model]}
+            field={@agent_form[:model]}
             label="Upstream model"
             list="upstream-models"
             autocomplete="off"
@@ -79,7 +79,7 @@ defmodule MeridianWeb.Admin.UserLive.Form do
     """
   end
 
-  defp model_hint(nil), do: "The model this persona sends requests to."
+  defp model_hint(nil), do: "The model this agent sends requests to."
   defp model_hint(_error), do: "Couldn't list upstream models; check LLM_BASE_URL."
 
   defp cancel_path(%User{id: nil}), do: ~p"/admin/users"
@@ -94,12 +94,12 @@ defmodule MeridianWeb.Admin.UserLive.Form do
 
     socket =
       if socket.assigns.live_action == :new do
-        persona_form =
-          %Persona{}
-          |> Personas.change_persona(default_persona_attrs(params))
-          |> to_form(as: :persona, action: :validate)
+        agent_form =
+          %Agent{}
+          |> Agents.change_agent(default_agent_attrs(params))
+          |> to_form(as: :agent, action: :validate)
 
-        assign(socket, persona_form: persona_form, force: params["force"] == "true")
+        assign(socket, agent_form: agent_form, force: params["force"] == "true")
       else
         socket
       end
@@ -112,7 +112,7 @@ defmodule MeridianWeb.Admin.UserLive.Form do
   defp save(socket, :new, params) do
     force = params["force"] == "true"
 
-    case Accounts.create_user(params["user"] || %{}, params["persona"] || %{}, force: force) do
+    case Accounts.create_user(params["user"] || %{}, params["agent"] || %{}, force: force) do
       {:ok, user} ->
         {:noreply,
          socket
@@ -122,8 +122,8 @@ defmodule MeridianWeb.Admin.UserLive.Form do
       {:error, :user, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
 
-      {:error, :persona, changeset} ->
-        {:noreply, assign(socket, persona_form: to_form(changeset, as: :persona), force: force)}
+      {:error, :agent, changeset} ->
+        {:noreply, assign(socket, agent_form: to_form(changeset, as: :agent), force: force)}
     end
   end
 
@@ -141,7 +141,7 @@ defmodule MeridianWeb.Admin.UserLive.Form do
   end
 
   # Only the model is entered here; slug and name are filled in by Accounts.create_user/3.
-  defp default_persona_attrs(params) do
-    Map.merge(%{"slug" => "default", "name" => "Default"}, params["persona"] || %{})
+  defp default_agent_attrs(params) do
+    Map.merge(%{"slug" => "default", "name" => "Default"}, params["agent"] || %{})
   end
 end

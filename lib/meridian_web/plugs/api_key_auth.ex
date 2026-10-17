@@ -5,7 +5,7 @@ defmodule MeridianWeb.Plugs.ApiKeyAuth do
   `Meridian.Accounts.authenticate_access_token/1`).
 
   On success, assigns `:current_user`, `:current_policy`, and `:current_api_key` (`nil` for
-  provider access tokens, which get the default policy: all of the user's personas).
+  provider access tokens, which get the default policy: all of the user's agents).
   Otherwise responds `401` with an OpenAI-style error.
 
   Without a bearer token:

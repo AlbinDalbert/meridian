@@ -1,39 +1,39 @@
 defmodule Meridian.Fixtures do
   @moduledoc """
-  Test helpers for creating users, personas, and API keys, plus a stubbed upstream.
+  Test helpers for creating users, agents, and API keys, plus a stubbed upstream.
   """
-  alias Meridian.{Accounts, Extensions, Personas, Threads}
+  alias Meridian.{Accounts, Extensions, Agents, Threads}
   alias Meridian.Accounts.ApiKey.Policy
 
   def unique_name(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
-  @doc "Creates a user with a default persona using `model` (validation skipped)."
-  def user_fixture(attrs \\ %{}, persona_attrs \\ %{}) do
+  @doc "Creates a user with a default agent using `model` (validation skipped)."
+  def user_fixture(attrs \\ %{}, agent_attrs \\ %{}) do
     {:ok, user} =
       Accounts.create_user(
         Map.merge(
           %{"name" => unique_name("user"), "email" => unique_name("user") <> "@example.com"},
           attrs
         ),
-        Map.merge(%{"model" => "upstream-model"}, persona_attrs),
+        Map.merge(%{"model" => "upstream-model"}, agent_attrs),
         force: true
       )
 
     user
   end
 
-  def persona_fixture(user, attrs \\ %{}) do
-    {:ok, persona} =
-      Personas.create_persona(
+  def agent_fixture(user, attrs \\ %{}) do
+    {:ok, agent} =
+      Agents.create_agent(
         user,
         Map.merge(
-          %{"slug" => unique_name("persona"), "name" => "Persona", "model" => "upstream-model"},
+          %{"slug" => unique_name("agent"), "name" => "Agent", "model" => "upstream-model"},
           attrs
         ),
         force: true
       )
 
-    persona
+    agent
   end
 
   @doc "Creates an extension with `source`: `owner`'s own, or global for nil."

@@ -152,7 +152,7 @@ defmodule MeridianWeb.Layouts do
   end
 
   # The sidebar's groups. The admin console has its own (operating the instance) above the one
-  # it shares with /me: the crew and what it can use. Pages differ between the two, but the
+  # it shares with /me: the agents and what they can use. Pages differ between the two, but the
   # entries are the same. `match` lists path prefixes that also count as being on that page;
   # entries without `to` aren't built yet.
   defp admin_sections do
@@ -165,7 +165,7 @@ defmodule MeridianWeb.Layouts do
        ]},
       {"Configure",
        configure_items(%{
-         crew: {~p"/admin/crew", ["/admin/personas/"]},
+         agents: {~p"/admin/agents", ["/admin/agents/"]},
          skills: {~p"/admin/skills", ["/admin/skills/"]},
          extensions: {~p"/admin/extensions", ["/admin/extensions/"]}
        })}
@@ -176,7 +176,7 @@ defmodule MeridianWeb.Layouts do
     [
       {"Configure",
        configure_items(%{
-         crew: {~p"/me", ["/me/personas/"]},
+         agents: {~p"/me", ["/me/agents/"]},
          skills: {~p"/me/skills", ["/me/skills/"]},
          extensions: {~p"/me/extensions", ["/me/extensions/"]}
        })}
@@ -184,12 +184,12 @@ defmodule MeridianWeb.Layouts do
   end
 
   defp configure_items(%{
-         crew: {crew, crew_match},
+         agents: {agents, agents_match},
          skills: {skills, skills_match},
          extensions: {extensions, extensions_match}
        }) do
     [
-      %{label: "Crew", to: crew, match: crew_match},
+      %{label: "Agents", to: agents, match: agents_match},
       %{label: "Skills", to: skills, match: skills_match},
       %{label: "MCPs"},
       %{label: "Extensions", to: extensions, match: extensions_match}

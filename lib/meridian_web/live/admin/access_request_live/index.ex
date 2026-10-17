@@ -1,12 +1,12 @@
 defmodule MeridianWeb.Admin.AccessRequestLive.Index do
   @moduledoc """
   Requests to be added, left on the public request page. Accepting creates the user, with a
-  default persona on the model set at the top of the page; snoozing moves a request to "Later";
+  default agent on the model set at the top of the page; snoozing moves a request to "Later";
   rejecting moves it to "Rejected", from where it can be restored.
   """
   use MeridianWeb, :live_view
 
-  alias Meridian.{AccessRequests, Personas, Upstream}
+  alias Meridian.{AccessRequests, Agents, Upstream}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -19,7 +19,7 @@ defmodule MeridianWeb.Admin.AccessRequestLive.Index do
     {:ok,
      socket
      |> assign(page_title: "Requests", upstream_models: upstream_models, force: false)
-     |> assign(model: Personas.newest_default_model() || "")
+     |> assign(model: Agents.newest_default_model() || "")
      |> load_requests()}
   end
 
@@ -47,10 +47,10 @@ defmodule MeridianWeb.Admin.AccessRequestLive.Index do
           name="model"
           id="accept-model"
           value={@model}
-          label="Model for new users' default persona"
+          label="Model for new users' default agent"
           list="upstream-models"
           autocomplete="off"
-          hint="Accepting someone creates their user with a default persona on this model."
+          hint="Accepting someone creates their user with a default agent on this model."
         />
         <.model_datalist id="upstream-models" models={@upstream_models} />
         <.input
@@ -177,7 +177,7 @@ defmodule MeridianWeb.Admin.AccessRequestLive.Index do
   end
 
   defp describe(kind, changeset) do
-    label = if kind == :persona, do: "the default persona's ", else: ""
+    label = if kind == :agent, do: "the default agent's ", else: ""
 
     changeset
     |> Ecto.Changeset.traverse_errors(&translate_error/1)

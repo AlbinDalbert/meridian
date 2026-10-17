@@ -1,6 +1,6 @@
 defmodule Meridian.Upstream.ModelCache do
   @moduledoc """
-  Caches the upstream's model list for a short time, so persona validation and `/v1/models`
+  Caches the upstream's model list for a short time, so agent validation and `/v1/models`
   don't hit the upstream on every call.
 
   The process only owns the ETS table; reads and writes happen in the caller. Concurrent misses

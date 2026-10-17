@@ -6,7 +6,7 @@ defmodule Meridian.Runs.Run do
   ends `completed`, `failed`, or `cancelled`. `awaiting_approval` is reserved for tool approval.
   A thread has at most one active (`queued`, `running`, `awaiting_approval`) run.
 
-  `persona_snapshot` freezes the persona the run was started with, so editing a persona never
+  `agent_snapshot` freezes the agent the run was started with, so editing an agent never
   changes a run in flight.
   """
   use Meridian.Schema
@@ -20,7 +20,7 @@ defmodule Meridian.Runs.Run do
 
   schema "runs" do
     field :status, Ecto.Enum, values: @statuses, default: :queued
-    field :persona_snapshot, :map
+    field :agent_snapshot, :map
     field :model, :string
     field :usage, :map
     field :error, :map
@@ -44,7 +44,7 @@ defmodule Meridian.Runs.Run do
   def create_changeset(run, attrs) do
     run
     |> change(attrs)
-    |> validate_required([:thread_id, :user_message_id, :persona_snapshot, :model])
+    |> validate_required([:thread_id, :user_message_id, :agent_snapshot, :model])
     |> unique_constraint(:thread_id, name: :runs_one_active_per_thread_index)
   end
 end

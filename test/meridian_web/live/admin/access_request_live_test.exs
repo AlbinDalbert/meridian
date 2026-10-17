@@ -4,7 +4,7 @@ defmodule MeridianWeb.Admin.AccessRequestLiveTest do
   import Phoenix.LiveViewTest
   import Meridian.Fixtures
 
-  alias Meridian.{AccessRequests, Accounts, Personas}
+  alias Meridian.{AccessRequests, Accounts, Agents}
 
   setup :log_in_admin
 
@@ -52,7 +52,7 @@ defmodule MeridianWeb.Admin.AccessRequestLiveTest do
 
     user = Accounts.get_user_by_email("bob@example.com")
     assert %{name: "Bob"} = user
-    assert %{model: "llama"} = Personas.get_default_persona(user)
+    assert %{model: "llama"} = Agents.get_default_agent(user)
   end
 
   test "snoozing, rejecting, and restoring", %{conn: conn} do

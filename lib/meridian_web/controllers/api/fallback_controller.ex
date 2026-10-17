@@ -12,12 +12,12 @@ defmodule MeridianWeb.Api.FallbackController do
   def call(conn, {:error, :not_found}),
     do: OpenAIError.send_error(conn, 404, "not_found", "Not found.")
 
-  def call(conn, {:error, :persona_not_found}) do
+  def call(conn, {:error, :agent_not_found}) do
     OpenAIError.send_error(
       conn,
       422,
-      "persona_not_found",
-      "The persona does not exist or this API key may not use it."
+      "agent_not_found",
+      "The agent does not exist or this API key may not use it."
     )
   end
 

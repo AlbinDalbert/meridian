@@ -11,7 +11,7 @@ defmodule MeridianWeb.ApiTest do
 
   setup %{conn: conn} do
     user = user_fixture(%{}, %{"model" => "qwen"})
-    coder = persona_fixture(user, %{"slug" => "coder"})
+    coder = agent_fixture(user, %{"slug" => "coder"})
     api_key = api_key_fixture(user)
 
     %{conn: authed(conn, api_key), user: user, coder: coder}
@@ -50,26 +50,26 @@ defmodule MeridianWeb.ApiTest do
     assert %{"error" => %{"code" => "missing_api_key"}} = json_response(conn, 401)
   end
 
-  describe "personas" do
+  describe "agents" do
     test "list the ones the key allows, marking the default", %{conn: conn, user: user} do
-      assert %{"data" => [default, coder]} = conn |> get(~p"/api/personas") |> json_response(200)
+      assert %{"data" => [default, coder]} = conn |> get(~p"/api/agents") |> json_response(200)
       assert %{"id" => "meridian/default", "model" => "qwen", "default" => true} = default
       assert %{"id" => "meridian/coder", "default" => false} = coder
 
       restricted =
         api_key_fixture(user, %{
-          "policy" => %{"allowed_personas" => ["coder"], "default_persona" => "coder"}
+          "policy" => %{"allowed_agents" => ["coder"], "default_agent" => "coder"}
         })
 
       assert %{"data" => [%{"id" => "meridian/coder", "default" => true}]} =
-               conn |> authed(restricted) |> get(~p"/api/personas") |> json_response(200)
+               conn |> authed(restricted) |> get(~p"/api/agents") |> json_response(200)
     end
   end
 
   describe "threads" do
     test "create, list, show, update, delete", %{conn: conn} do
       thread = create_thread(conn, %{"title" => "Plans"})
-      assert thread["persona"] == "meridian/default"
+      assert thread["agent"] == "meridian/default"
       assert thread["title"] == "Plans"
 
       assert %{"data" => [%{"id" => id}]} = conn |> get(~p"/api/threads") |> json_response(200)
@@ -78,28 +78,28 @@ defmodule MeridianWeb.ApiTest do
       assert %{"data" => %{"active_run" => nil}} =
                conn |> get(~p"/api/threads/#{id}") |> json_response(200)
 
-      assert %{"data" => %{"title" => "Renamed", "persona" => "meridian/coder"}} =
+      assert %{"data" => %{"title" => "Renamed", "agent" => "meridian/coder"}} =
                conn
-               |> patch(~p"/api/threads/#{id}", %{"title" => "Renamed", "persona" => "coder"})
+               |> patch(~p"/api/threads/#{id}", %{"title" => "Renamed", "agent" => "coder"})
                |> json_response(200)
 
       assert conn |> delete(~p"/api/threads/#{id}") |> response(204)
       assert conn |> get(~p"/api/threads/#{id}") |> json_response(404)
     end
 
-    test "accept a persona model id", %{conn: conn} do
-      assert %{"persona" => "meridian/coder"} =
-               create_thread(conn, %{"persona" => "meridian/coder"})
+    test "accept an agent model id", %{conn: conn} do
+      assert %{"agent" => "meridian/coder"} =
+               create_thread(conn, %{"agent" => "meridian/coder"})
     end
 
-    test "only use personas the key allows", %{conn: conn, user: user} do
-      restricted = api_key_fixture(user, %{"policy" => %{"allowed_personas" => ["default"]}})
+    test "only use agents the key allows", %{conn: conn, user: user} do
+      restricted = api_key_fixture(user, %{"policy" => %{"allowed_agents" => ["default"]}})
       conn = authed(conn, restricted)
 
-      assert %{"error" => %{"code" => "persona_not_found"}} =
-               conn |> post(~p"/api/threads", %{"persona" => "coder"}) |> json_response(422)
+      assert %{"error" => %{"code" => "agent_not_found"}} =
+               conn |> post(~p"/api/threads", %{"agent" => "coder"}) |> json_response(422)
 
-      assert %{"persona" => "meridian/default"} = create_thread(conn)
+      assert %{"agent" => "meridian/default"} = create_thread(conn)
     end
 
     test "of other users are not visible", %{conn: conn} do
@@ -129,7 +129,7 @@ defmodule MeridianWeb.ApiTest do
       assert message["role"] == "user"
       assert message["content"] == [%{"type" => "text", "text" => "Hi"}]
       assert run["status"] == "queued"
-      assert run["persona"] == "meridian/default"
+      assert run["agent"] == "meridian/default"
 
       assert %{"data" => %{"active_run" => %{"id" => run_id}}} =
                conn |> get(~p"/api/threads/#{thread["id"]}") |> json_response(200)

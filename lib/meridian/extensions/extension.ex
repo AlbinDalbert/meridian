@@ -3,7 +3,7 @@ defmodule Meridian.Extensions.Extension do
   An extension: a named Lua script (see `Meridian.Extensions.Script`). Global extensions
   (`user_id` nil) can be used by everyone; a user's own extensions only by that user.
 
-  Personas enable extensions by id, so names only need to be unique among the global
+  Agents enable extensions by id, so names only need to be unique among the global
   extensions and among each user's own.
   """
   use Meridian.Schema

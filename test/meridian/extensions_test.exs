@@ -6,7 +6,7 @@ defmodule Meridian.ExtensionsTest do
 
   @moduletag :capture_log
 
-  alias Meridian.{Extensions, Personas, Runs, Threads}
+  alias Meridian.{Extensions, Agents, Runs, Threads}
   alias Meridian.Extensions.{Job, Script}
   alias Meridian.Runs.Worker
 
@@ -25,7 +25,7 @@ defmodule Meridian.ExtensionsTest do
   local M = { settings = { section = "Test section." } }
 
   function M.before_run(config, ctx)
-    table.insert(config.system_prompt, ctx.settings.section .. " " .. ctx.persona.slug)
+    table.insert(config.system_prompt, ctx.settings.section .. " " .. ctx.agent.slug)
     config.params.seed = 1
     return config
   end
@@ -50,12 +50,12 @@ defmodule Meridian.ExtensionsTest do
 
   setup do
     user = user_fixture(%{}, %{"model" => "qwen", "system_prompt" => "Be brief."})
-    %{user: user, persona: Personas.get_default_persona(user)}
+    %{user: user, agent: Agents.get_default_agent(user)}
   end
 
-  defp enable(persona, extensions) do
-    {:ok, persona} = Personas.update_persona(persona, %{"extensions" => extensions})
-    persona
+  defp enable(agent, extensions) do
+    {:ok, agent} = Agents.update_agent(agent, %{"extensions" => extensions})
+    agent
   end
 
   # Sends "Hi" on a new thread and runs it against a stubbed reply of "Hello".
@@ -199,7 +199,7 @@ defmodule Meridian.ExtensionsTest do
   end
 
   describe "enablement" do
-    test "extensions only run for personas that enable them", %{user: user} do
+    test "extensions only run for agents that enable them", %{user: user} do
       extension = extension_fixture(nil, @observer)
       watch_hooks(extension)
       {_thread, run} = run_message(user)
@@ -209,11 +209,11 @@ defmodule Meridian.ExtensionsTest do
 
     test "an enabled extension's hooks are called in lifecycle order", %{
       user: user,
-      persona: persona
+      agent: agent
     } do
       extension = extension_fixture(nil, @observer)
       watch_hooks(extension)
-      enable(persona, %{extension.id => %{}})
+      enable(agent, %{extension.id => %{}})
       {thread, run} = run_message(user)
       assert run.status == :completed
 
@@ -225,40 +225,40 @@ defmodule Meridian.ExtensionsTest do
       assert_received {:hook, "thread_deleted", :ok}
     end
 
-    test "hooks get the run's context and the persona's settings", %{user: user, persona: persona} do
+    test "hooks get the run's context and the agent's settings", %{user: user, agent: agent} do
       extension =
         extension_fixture(user, """
         return {
           settings = { greeting = "Hello" },
           before_run = function(config, ctx)
             table.insert(config.system_prompt, table.concat({ctx.settings.greeting,
-              ctx.persona.slug, ctx.persona.model, tostring(ctx.user_id == ctx.persona.id),
+              ctx.agent.slug, ctx.agent.model, tostring(ctx.user_id == ctx.agent.id),
               tostring(ctx.run_id ~= nil), tostring(ctx.thread_id ~= nil)}, " "))
             return config
           end,
         }
         """)
 
-      enable(persona, %{extension.id => %{"greeting" => "Hey"}})
+      enable(agent, %{extension.id => %{"greeting" => "Hey"}})
       run_message(user)
       assert system_prompt_sent() == "Be brief.\n\nHey default qwen false true true"
     end
 
-    test "settings are frozen into the run", %{user: user, persona: persona} do
+    test "settings are frozen into the run", %{user: user, agent: agent} do
       extension = extension_fixture(nil, @modifier)
-      persona = enable(persona, %{extension.id => %{}})
+      agent = enable(agent, %{extension.id => %{}})
       thread = thread_fixture(user)
       {_message, run} = message_fixture(thread)
 
-      enable(persona, %{})
+      enable(agent, %{})
       stub_upstream_stream(completion_events(["ok"]))
       :ok = perform_job(Worker, %{"run_id" => run.id})
       assert system_prompt_sent() == "Be brief.\n\nTest section. default"
     end
 
-    test "a saved script is used from the next call on", %{user: user, persona: persona} do
+    test "a saved script is used from the next call on", %{user: user, agent: agent} do
       extension = extension_fixture(nil, @modifier)
-      enable(persona, %{extension.id => %{}})
+      enable(agent, %{extension.id => %{}})
       run_message(user)
       assert system_prompt_sent() =~ "Test section."
 
@@ -271,30 +271,30 @@ defmodule Meridian.ExtensionsTest do
       assert system_prompt_sent() =~ "New section."
     end
 
-    test "extensions run in name order", %{user: user, persona: persona} do
+    test "extensions run in name order", %{user: user, agent: agent} do
       b = extension_fixture(nil, section_script("B"), %{"name" => "b-ext"})
       a = extension_fixture(nil, section_script("A"), %{"name" => "a-ext"})
-      enable(persona, %{b.id => %{}, a.id => %{}})
+      enable(agent, %{b.id => %{}, a.id => %{}})
       run_message(user)
       assert system_prompt_sent() == "Be brief.\n\nA\n\nB"
     end
 
     test "entries for extensions that are gone, or someone else's, are kept and ignored", %{
       user: user,
-      persona: persona
+      agent: agent
     } do
       gone = extension_fixture(nil, @modifier)
       theirs = extension_fixture(user_fixture(), @modifier)
-      persona = enable(persona, %{gone.id => %{"x" => 1}, theirs.id => %{}})
+      agent = enable(agent, %{gone.id => %{"x" => 1}, theirs.id => %{}})
       {:ok, _} = Extensions.delete_extension(gone)
 
-      assert Map.keys(persona.extensions) |> Enum.sort() == Enum.sort([gone.id, theirs.id])
-      assert Extensions.enabled(Personas.get_persona!(persona.id)) == []
+      assert Map.keys(agent.extensions) |> Enum.sort() == Enum.sort([gone.id, theirs.id])
+      assert Extensions.enabled(Agents.get_agent!(agent.id)) == []
       run_message(user)
       assert system_prompt_sent() == "Be brief."
     end
 
-    test "settings are validated", %{persona: persona} do
+    test "settings are validated", %{agent: agent} do
       extension =
         extension_fixture(nil, """
         return {
@@ -306,17 +306,17 @@ defmodule Meridian.ExtensionsTest do
         """)
 
       name = extension.name
-      assert enable(persona, %{extension.id => %{"mode" => "observe"}})
+      assert enable(agent, %{extension.id => %{"mode" => "observe"}})
 
       assert {:error, changeset} =
-               Personas.update_persona(persona, %{
+               Agents.update_agent(agent, %{
                  "extensions" => %{extension.id => %{"mode" => "?"}}
                })
 
       assert errors_on(changeset).extensions == ["#{name}: unknown mode"]
 
       assert {:error, changeset} =
-               Personas.update_persona(persona, %{"extensions" => %{extension.id => "on"}})
+               Agents.update_agent(agent, %{"extensions" => %{extension.id => "on"}})
 
       assert errors_on(changeset).extensions == ["#{name}: settings must be a JSON object"]
     end
@@ -334,9 +334,9 @@ defmodule Meridian.ExtensionsTest do
   end
 
   describe "chained hooks" do
-    test "change the request and the saved reply", %{user: user, persona: persona} do
+    test "change the request and the saved reply", %{user: user, agent: agent} do
       extension = extension_fixture(nil, @modifier)
-      enable(persona, %{extension.id => %{}})
+      enable(agent, %{extension.id => %{}})
       {thread, _run} = run_message(user)
 
       assert_received {:upstream_request, body}
@@ -361,7 +361,7 @@ defmodule Meridian.ExtensionsTest do
         ] do
       test "a handler that is #{mode} is skipped, and its error kept", %{
         user: user,
-        persona: persona
+        agent: agent
       } do
         extension =
           extension_fixture(nil, """
@@ -369,7 +369,7 @@ defmodule Meridian.ExtensionsTest do
           return { before_run = handler, context = handler, message_end = handler }
           """)
 
-        enable(persona, %{extension.id => %{}})
+        enable(agent, %{extension.id => %{}})
         {thread, run} = run_message(user)
         assert run.status == :completed
 
@@ -387,13 +387,13 @@ defmodule Meridian.ExtensionsTest do
       end
     end
 
-    test "before_run can reject a run", %{user: user, persona: persona} do
+    test "before_run can reject a run", %{user: user, agent: agent} do
       extension =
         extension_fixture(nil, """
         return { before_run = function() return false, "not today" end }
         """)
 
-      enable(persona, %{extension.id => %{}})
+      enable(agent, %{extension.id => %{}})
       {_thread, run} = run_message(user)
 
       assert run.status == :failed
@@ -401,13 +401,13 @@ defmodule Meridian.ExtensionsTest do
       refute_received {:upstream_request, _body}
     end
 
-    test "other hooks can't halt", %{user: user, persona: persona} do
+    test "other hooks can't halt", %{user: user, agent: agent} do
       extension =
         extension_fixture(nil, """
         return { context = function() return false, "not today" end }
         """)
 
-      enable(persona, %{extension.id => %{}})
+      enable(agent, %{extension.id => %{}})
       {_thread, run} = run_message(user)
       assert run.status == :completed
     end
@@ -416,11 +416,11 @@ defmodule Meridian.ExtensionsTest do
   describe "run_end" do
     test "fires for runs that fail, and for cancelled queued runs", %{
       user: user,
-      persona: persona
+      agent: agent
     } do
       extension = extension_fixture(nil, @observer)
       watch_hooks(extension)
-      enable(persona, %{extension.id => %{}})
+      enable(agent, %{extension.id => %{}})
 
       thread = thread_fixture(user)
       {_message, run} = message_fixture(thread)
@@ -443,7 +443,7 @@ defmodule Meridian.ExtensionsTest do
     local thread = meridian.threads.get(run.thread_id)
     if thread and thread.title == nil then
       meridian.jobs.enqueue("name_thread",
-        { thread_id = run.thread_id, model = ctx.settings.model or ctx.persona.model },
+        { thread_id = run.thread_id, model = ctx.settings.model or ctx.agent.model },
         { unique = run.thread_id })
     end
   end
@@ -481,10 +481,10 @@ defmodule Meridian.ExtensionsTest do
 
     test "a hook queues a job that calls the model and names the thread", %{
       user: user,
-      persona: persona
+      agent: agent
     } do
       extension = extension_fixture(nil, @title)
-      enable(persona, %{extension.id => %{}})
+      enable(agent, %{extension.id => %{}})
       {thread, _run} = run_message(user)
 
       assert [job] = all_enqueued(worker: Job)
@@ -499,9 +499,9 @@ defmodule Meridian.ExtensionsTest do
       assert Threads.get_thread!(thread.id).title == "Greetings"
     end
 
-    test "unique jobs aren't queued twice", %{user: user, persona: persona} do
+    test "unique jobs aren't queued twice", %{user: user, agent: agent} do
       extension = extension_fixture(nil, @title)
-      enable(persona, %{extension.id => %{}})
+      enable(agent, %{extension.id => %{}})
       thread = thread_fixture(user)
 
       for _ <- 1..2 do
@@ -515,7 +515,7 @@ defmodule Meridian.ExtensionsTest do
 
     test "jobs whose extension or function is gone are cancelled", %{user: user} do
       extension = extension_fixture(nil, @title)
-      ctx = %{"user_id" => user.id, "persona" => %{}}
+      ctx = %{"user_id" => user.id, "agent" => %{}}
       args = %{"extension_id" => extension.id, "job" => "nope", "args" => %{}, "ctx" => ctx}
       assert {:cancel, _} = perform_job(Job, args)
 
@@ -523,7 +523,7 @@ defmodule Meridian.ExtensionsTest do
       assert {:cancel, _} = perform_job(Job, %{args | "job" => "name_thread"})
     end
 
-    test "only reach the user's own threads", %{user: user, persona: persona} do
+    test "only reach the user's own threads", %{user: user, agent: agent} do
       theirs = thread_fixture(user_fixture(), %{"title" => "Secret"})
 
       extension =
@@ -540,13 +540,13 @@ defmodule Meridian.ExtensionsTest do
         }
         """)
 
-      enable(persona, %{extension.id => %{}})
+      enable(agent, %{extension.id => %{}})
       run_message(user)
       assert system_prompt_sent() == "Be brief.\n\ntrue nil nil not_found nil"
       assert Threads.get_thread!(theirs.id).title == "Secret"
     end
 
-    test "time and JSON", %{user: user, persona: persona} do
+    test "time and JSON", %{user: user, agent: agent} do
       extension =
         extension_fixture(nil, """
         return {
@@ -560,7 +560,7 @@ defmodule Meridian.ExtensionsTest do
         }
         """)
 
-      enable(persona, %{extension.id => %{}})
+      enable(agent, %{extension.id => %{}})
       run_message(user)
       year = DateTime.now!("Europe/Stockholm").year
 

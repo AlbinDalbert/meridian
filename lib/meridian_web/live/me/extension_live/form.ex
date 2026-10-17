@@ -1,7 +1,7 @@
 defmodule MeridianWeb.Me.ExtensionLive.Form do
   use MeridianWeb, :live_view
 
-  alias Meridian.{Extensions, Personas}
+  alias Meridian.{Extensions, Agents}
   alias Meridian.Extensions.Extension
 
   @impl true
@@ -18,7 +18,7 @@ defmodule MeridianWeb.Me.ExtensionLive.Form do
       editable: true,
       last_error: nil,
       tools: %{},
-      personas: []
+      agents: []
     )
   end
 
@@ -37,9 +37,9 @@ defmodule MeridianWeb.Me.ExtensionLive.Form do
       last_error: if(editable, do: Extensions.last_error(extension)),
       description: Extensions.description(extension),
       tools: Extensions.tools(extension),
-      personas:
+      agents:
         user
-        |> Personas.list_personas()
+        |> Agents.list_agents()
         |> Enum.filter(&Map.has_key?(&1.extensions, extension.id))
     )
   end
@@ -57,16 +57,16 @@ defmodule MeridianWeb.Me.ExtensionLive.Form do
         <:subtitle>
           <%= cond do %>
             <% is_nil(@extension.id) -> %>
-              Your own extension: only your personas can use it.
+              Your own extension: only your agents can use it.
             <% @editable -> %>
               Your own extension.
             <% true -> %>
               A global extension: {@description}
           <% end %>
-          <span :if={@personas != []}>
+          <span :if={@agents != []}>
             On for
-            <%= for persona <- @personas do %>
-              <.link navigate={~p"/me/personas/#{persona}/edit"}>{persona.name}</.link>{" "}
+            <%= for agent <- @agents do %>
+              <.link navigate={~p"/me/agents/#{agent}/edit"}>{agent.name}</.link>{" "}
             <% end %>
           </span>
         </:subtitle>

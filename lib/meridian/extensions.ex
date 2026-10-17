@@ -8,9 +8,9 @@ defmodule Meridian.Extensions do
   (made in `/me`) only by that user. Saving checks the script by loading it; the new version is
   used from the next hook call on.
 
-  Personas enable extensions by id: `personas.extensions` maps an extension's id to its
+  Agents enable extensions by id: `agents.extensions` maps an extension's id to its
   settings, which are merged over the script's defaults. Entries for extensions that are gone,
-  or that the persona's user can't use, are kept but ignored.
+  or that the agent's user can't use, are kept but ignored.
 
   Hook handlers run sandboxed with a timeout (`:hook_timeout`, milliseconds). A handler that
   fails, or returns something that isn't a valid value for its hook, is skipped, and the error
@@ -30,12 +30,12 @@ defmodule Meridian.Extensions do
 
   alias Meridian.Accounts.User
   alias Meridian.Extensions.{Cache, Context, Extension, Script}
-  alias Meridian.Personas.Persona
+  alias Meridian.Agents.Agent
   alias Meridian.Repo
   alias Meridian.Runs.Run
   alias Meridian.Threads.Thread
 
-  @typedoc "An enabled extension: the extension, its loaded script, and the persona's settings."
+  @typedoc "An enabled extension: the extension, its loaded script, and the agent's settings."
   @type enabled :: {Extension.t(), Script.t(), map()}
 
   @typedoc """
@@ -57,7 +57,7 @@ defmodule Meridian.Extensions do
 
   @template """
   -- An extension is the table this script returns: its description, its settings (with
-  -- their defaults; each persona that turns it on can change them), and a function for
+  -- their defaults; each agent that turns it on can change them), and a function for
   -- each hook it wants. See the reference below the editor.
   local M = {
     description = "Says hello in the system prompt.",
@@ -66,7 +66,7 @@ defmodule Meridian.Extensions do
 
   -- Before each run: change the system prompt (a list of sections) and the model params.
   function M.before_run(config, ctx)
-    table.insert(config.system_prompt, ctx.settings.greeting .. ", " .. ctx.persona.name .. "!")
+    table.insert(config.system_prompt, ctx.settings.greeting .. ", " .. ctx.agent.name .. "!")
     return config
   end
 
@@ -203,10 +203,10 @@ defmodule Meridian.Extensions do
     )
   end
 
-  ## Personas
+  ## Agents
 
   @doc """
-  Checks a persona's `extensions` map for a persona of `user_id`. Returns error messages: every
+  Checks an agent's `extensions` map for an agent of `user_id`. Returns error messages: every
   value must be a map, and the settings of extensions the user can use must pass their
   script's `validate`.
   """
@@ -230,7 +230,7 @@ defmodule Meridian.Extensions do
   defp validate_settings(extension, settings, user_id) do
     with {:ok, %{validate?: true} = script} <- script(extension),
          settings = Map.merge(script.settings, settings),
-         ctx = %Context{persona: %Persona{user_id: user_id}, user_id: user_id, settings: settings},
+         ctx = %Context{agent: %Agent{user_id: user_id}, user_id: user_id, settings: settings},
          {:ok, result} <-
            Script.call(
              script,
@@ -250,18 +250,18 @@ defmodule Meridian.Extensions do
     end
   end
 
-  # The extensions with these ids that a persona of `user_id` can use, by name.
+  # The extensions with these ids that an agent of `user_id` can use, by name.
   defp fetch_usable(ids, user_id) do
     ids = Enum.filter(ids, &match?({:ok, _}, Ecto.UUID.cast(&1)))
     Repo.all(from e in available(user_id), where: e.id in ^ids, order_by: [e.name, e.id])
   end
 
   @doc """
-  The extensions `persona` enables, with their scripts and settings, in the order hooks call
+  The extensions `agent` enables, with their scripts and settings, in the order hooks call
   them (by name). Extensions whose script doesn't load are left out.
   """
-  @spec enabled(Persona.t() | nil) :: [enabled()]
-  def enabled(%Persona{extensions: extensions, user_id: user_id})
+  @spec enabled(Agent.t() | nil) :: [enabled()]
+  def enabled(%Agent{extensions: extensions, user_id: user_id})
       when is_map(extensions) and map_size(extensions) > 0 do
     extensions
     |> Map.keys()
@@ -281,7 +281,7 @@ defmodule Meridian.Extensions do
     end)
   end
 
-  def enabled(_persona), do: []
+  def enabled(_agent), do: []
 
   ## Tools
 
@@ -529,7 +529,7 @@ defmodule Meridian.Extensions do
   end
 
   defp to_lua(_hook, %Thread{} = thread),
-    do: %{"id" => thread.id, "title" => thread.title, "persona_id" => thread.persona_id}
+    do: %{"id" => thread.id, "title" => thread.title, "agent_id" => thread.agent_id}
 
   defp to_lua(_hook, value), do: value
 

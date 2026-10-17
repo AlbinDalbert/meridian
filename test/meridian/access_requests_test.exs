@@ -3,7 +3,7 @@ defmodule Meridian.AccessRequestsTest do
 
   import Meridian.Fixtures
 
-  alias Meridian.{AccessRequests, Accounts, Personas}
+  alias Meridian.{AccessRequests, Accounts, Agents}
 
   test "a request is recorded, and says the same whoever asks" do
     assert {:ok, :requested} =
@@ -73,7 +73,7 @@ defmodule Meridian.AccessRequestsTest do
     assert [%{times_requested: 2}] = AccessRequests.list_requests("snoozed")
   end
 
-  test "accepting creates the user with a default persona and removes the request" do
+  test "accepting creates the user with a default agent and removes the request" do
     {:ok, :requested} = AccessRequests.request_access(%{"email" => "kim@example.com"})
 
     {:ok, :requested} =
@@ -83,18 +83,18 @@ defmodule Meridian.AccessRequestsTest do
 
     assert {:ok, user} = AccessRequests.accept(kim, %{"model" => "qwen"}, force: true)
     assert %{name: "kim", email: "kim@example.com"} = user
-    assert %{model: "qwen"} = Personas.get_default_persona(user)
+    assert %{model: "qwen"} = Agents.get_default_agent(user)
 
     assert {:ok, %{name: "Lee"}} = AccessRequests.accept(lee, %{"model" => "qwen"}, force: true)
     assert AccessRequests.list_requests("pending") == []
-    assert Personas.newest_default_model() == "qwen"
+    assert Agents.newest_default_model() == "qwen"
   end
 
   test "a failed accept keeps the request" do
     {:ok, :requested} = AccessRequests.request_access(%{"email" => "kim@example.com"})
     [request] = AccessRequests.list_requests("pending")
 
-    assert {:error, :persona, _changeset} = AccessRequests.accept(request, %{"model" => ""})
+    assert {:error, :agent, _changeset} = AccessRequests.accept(request, %{"model" => ""})
 
     # Someone added them by hand in the meantime.
     user_fixture(%{"email" => "kim@example.com"})

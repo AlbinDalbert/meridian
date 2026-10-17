@@ -10,15 +10,15 @@ defmodule MeridianWeb.Admin.RunLiveTest do
   setup :log_in_admin
 
   setup do
-    user = user_fixture(%{"name" => "Ada"}, %{"slug" => "secret-persona"})
+    user = user_fixture(%{"name" => "Ada"}, %{"slug" => "secret-agent"})
     thread = thread_fixture(user, %{"title" => "Trip plans"})
     {message, run} = message_fixture(thread, "Where to?")
     %{user: user, thread: thread, message: message, run: run}
   end
 
-  # Nothing the user said, or what their thread or persona is called, ever reaches the console.
+  # Nothing the user said, or what their thread or agent is called, ever reaches the console.
   defp refute_conversation(html) do
-    for private <- ["Where to?", "To the mountains", "Trip plans", "secret-persona"],
+    for private <- ["Where to?", "To the mountains", "Trip plans", "secret-agent"],
         do: refute(html =~ private, "the admin console shows #{inspect(private)}")
   end
 

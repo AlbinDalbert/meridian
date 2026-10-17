@@ -1,7 +1,7 @@
 defmodule MeridianWeb.Me.SkillLive.Form do
   use MeridianWeb, :live_view
 
-  alias Meridian.{Personas, Skills}
+  alias Meridian.{Agents, Skills}
   alias Meridian.Skills.Skill
 
   @impl true
@@ -11,7 +11,7 @@ defmodule MeridianWeb.Me.SkillLive.Form do
 
   defp apply_action(socket, :new, _params) do
     skill = %Skill{user_id: socket.assigns.current_user.id}
-    assign(socket, page_title: "New skill", skill: skill, editable: true, personas: [])
+    assign(socket, page_title: "New skill", skill: skill, editable: true, agents: [])
   end
 
   # Global skills and the user's own: anyone else's id raises, which is a 404. Global ones can
@@ -24,7 +24,7 @@ defmodule MeridianWeb.Me.SkillLive.Form do
       page_title: skill.name,
       skill: skill,
       editable: skill.user_id == user.id,
-      personas: user |> Personas.list_personas() |> Enum.filter(&(skill.id in &1.skills))
+      agents: user |> Agents.list_agents() |> Enum.filter(&(skill.id in &1.skills))
     )
   end
 
@@ -37,16 +37,16 @@ defmodule MeridianWeb.Me.SkillLive.Form do
         <:subtitle>
           <%= cond do %>
             <% is_nil(@skill.id) -> %>
-              Your own skill: only your personas can use it.
+              Your own skill: only your agents can use it.
             <% @editable -> %>
               Your own skill.
             <% true -> %>
               A global skill: {@skill.description}
           <% end %>
-          <span :if={@personas != []}>
+          <span :if={@agents != []}>
             On for
-            <%= for persona <- @personas do %>
-              <.link navigate={~p"/me/personas/#{persona}/edit"}>{persona.name}</.link>{" "}
+            <%= for agent <- @agents do %>
+              <.link navigate={~p"/me/agents/#{agent}/edit"}>{agent.name}</.link>{" "}
             <% end %>
           </span>
         </:subtitle>

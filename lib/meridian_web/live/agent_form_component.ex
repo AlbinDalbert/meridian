@@ -1,16 +1,16 @@
-defmodule MeridianWeb.PersonaFormComponent do
+defmodule MeridianWeb.AgentFormComponent do
   @moduledoc """
-  The persona form, shared by the admin console and `/me`. The LiveView that renders it loads
-  the persona (making sure the person may edit it) and passes:
+  The agent form, shared by the admin console and `/me`. The LiveView that renders it loads
+  the agent (making sure the person may edit it) and passes:
 
-    * `persona` - the persona to edit, or a new `%Persona{}` for `user`.
-    * `user` - who the persona belongs to (new personas are created for them).
+    * `agent` - the agent to edit, or a new `%Agent{}` for `user`.
+    * `user` - who the agent belongs to (new agents are created for them).
     * `return_to` - where to go after saving.
     * `model_error_hint` - shown under the model field when the upstream can't be listed.
   """
   use MeridianWeb, :live_component
 
-  alias Meridian.{Extensions, Personas, Skills, Upstream}
+  alias Meridian.{Extensions, Agents, Skills, Upstream}
 
   @impl true
   def update(assigns, socket) do
@@ -21,7 +21,7 @@ defmodule MeridianWeb.PersonaFormComponent do
         socket
       else
         socket
-        |> assign(form: to_form(Personas.change_persona(socket.assigns.persona)), force: false)
+        |> assign(form: to_form(Agents.change_agent(socket.assigns.agent)), force: false)
         |> assign(advanced_open: false)
         |> assign_extensions()
         |> assign_skills()
@@ -31,11 +31,11 @@ defmodule MeridianWeb.PersonaFormComponent do
     {:ok, socket}
   end
 
-  # One row per extension the persona's user can use (the global ones and their own): whether
-  # it's enabled and its settings as JSON text. The persona's settings are shown merged over the
+  # One row per extension the agent's user can use (the global ones and their own): whether
+  # it's enabled and its settings as JSON text. The agent's settings are shown merged over the
   # defaults, so every setting is visible.
   defp assign_extensions(socket) do
-    enabled = socket.assigns.persona.extensions
+    enabled = socket.assigns.agent.extensions
 
     rows =
       for extension <- Extensions.list_available(socket.assigns.user) do
@@ -56,11 +56,11 @@ defmodule MeridianWeb.PersonaFormComponent do
     assign(socket, extensions: rows, missing_extensions: Map.keys(enabled) -- available)
   end
 
-  # One row per skill the persona's user can use, and whether it's on. A skill's recommended
+  # One row per skill the agent's user can use, and whether it's on. A skill's recommended
   # extensions are checked against the extension rows as they are in the form (see
   # `skill_warning/2`).
   defp assign_skills(socket) do
-    enabled = socket.assigns.persona.skills
+    enabled = socket.assigns.agent.skills
 
     rows =
       for skill <- Skills.list_available(socket.assigns.user) do
@@ -94,7 +94,7 @@ defmodule MeridianWeb.PersonaFormComponent do
           Enum.map(available, &names[&1]) ++
             if(gone == [], do: [], else: ["#{length(gone)} that you can't use"])
 
-        "Works best with #{Enum.join(parts, ", ")}, which #{if length(missing) == 1, do: "isn't", else: "aren't"} on for this persona."
+        "Works best with #{Enum.join(parts, ", ")}, which #{if length(missing) == 1, do: "isn't", else: "aren't"} on for this agent."
     end
   end
 
@@ -118,7 +118,7 @@ defmodule MeridianWeb.PersonaFormComponent do
     <div>
       <.form
         for={@form}
-        id="persona-form"
+        id="agent-form"
         class="card"
         phx-change="validate"
         phx-submit="save"
@@ -127,7 +127,7 @@ defmodule MeridianWeb.PersonaFormComponent do
         <.input
           field={@form[:slug]}
           label="Slug"
-          hint={"Clients select this persona as the model meridian/#{@form[:slug].value || "<slug>"}."}
+          hint={"Clients select this agent as the model meridian/#{@form[:slug].value || "<slug>"}."}
           required
         />
         <.input field={@form[:name]} label="Display name" required />
@@ -147,7 +147,7 @@ defmodule MeridianWeb.PersonaFormComponent do
           rows="10"
           hint="Goes before the client's own system prompt."
         />
-        <fieldset class="field" id="persona-extensions">
+        <fieldset class="field" id="agent-extensions">
           <legend>Extensions</legend>
           <p :if={@extensions == []} class="hint">No extensions to turn on yet.</p>
           <div :for={ext <- @extensions} class="extension">
@@ -175,7 +175,7 @@ defmodule MeridianWeb.PersonaFormComponent do
           </p>
           <.error :for={{message, _opts} <- @form[:extensions].errors}>{message}</.error>
         </fieldset>
-        <fieldset class="field" id="persona-skills">
+        <fieldset class="field" id="agent-skills">
           <legend>Skills</legend>
           <p :if={@skills == []} class="hint">No skills to turn on yet.</p>
           <div :for={skill <- @skills} class="extension">
@@ -203,7 +203,7 @@ defmodule MeridianWeb.PersonaFormComponent do
         </fieldset>
         <%!-- Whether it's open lives on the server (toggle_advanced), so the re-render after every
              change doesn't close it, and it opens by itself to show an error inside. --%>
-        <details id="persona-advanced" class="advanced" open={@advanced_open}>
+        <details id="agent-advanced" class="advanced" open={@advanced_open}>
           <summary phx-click="toggle_advanced" phx-target={@myself}>
             Advanced<span :if={note = advanced_note(@form, @force)} class="inline-hint">{note}</span>
           </summary>
@@ -259,14 +259,14 @@ defmodule MeridianWeb.PersonaFormComponent do
     {:noreply, update(socket, :advanced_open, &(!&1))}
   end
 
-  def handle_event("validate", %{"persona" => params} = all, socket) do
+  def handle_event("validate", %{"agent" => params} = all, socket) do
     socket =
       socket
       |> update_extensions(all["extensions"] || %{})
       |> update_skills(all["skills"] || %{})
 
     params = params |> decode_params() |> put_extensions(socket) |> put_skills(socket)
-    changeset = Personas.change_persona(socket.assigns.persona, params)
+    changeset = Agents.change_agent(socket.assigns.agent, params)
 
     {:noreply,
      socket
@@ -274,7 +274,7 @@ defmodule MeridianWeb.PersonaFormComponent do
      |> open_advanced_on_error(changeset)}
   end
 
-  def handle_event("save", %{"persona" => params} = all, socket) do
+  def handle_event("save", %{"agent" => params} = all, socket) do
     force = all["force"] == "true"
 
     socket =
@@ -283,18 +283,18 @@ defmodule MeridianWeb.PersonaFormComponent do
       |> update_skills(all["skills"] || %{})
 
     params = params |> decode_params() |> put_extensions(socket) |> put_skills(socket)
-    persona = socket.assigns.persona
+    agent = socket.assigns.agent
 
     result =
-      if persona.id,
-        do: Personas.update_persona(persona, params, force: force),
-        else: Personas.create_persona(socket.assigns.user, params, force: force)
+      if agent.id,
+        do: Agents.update_agent(agent, params, force: force),
+        else: Agents.create_agent(socket.assigns.user, params, force: force)
 
     case result do
-      {:ok, _persona} ->
+      {:ok, _agent} ->
         {:noreply,
          socket
-         |> put_flash(:info, "Persona saved.")
+         |> put_flash(:info, "Agent saved.")
          |> push_navigate(to: socket.assigns.return_to)}
 
       {:error, changeset} ->
@@ -345,17 +345,17 @@ defmodule MeridianWeb.PersonaFormComponent do
     assign(socket, skills: rows)
   end
 
-  # The persona's `skills`: the enabled rows, plus skills that are gone, which are kept.
+  # The agent's `skills`: the enabled rows, plus skills that are gone, which are kept.
   defp put_skills(attrs, socket) do
     enabled = for %{enabled: true, id: id} <- socket.assigns.skills, do: id
     Map.put(attrs, "skills", socket.assigns.missing_skills ++ enabled)
   end
 
-  # The persona's `extensions`: the enabled rows with their settings, plus entries for
+  # The agent's `extensions`: the enabled rows with their settings, plus entries for
   # extensions that are gone, which are kept as they were. Settings that aren't a JSON
   # object are passed on as text, so the changeset rejects them.
   defp put_extensions(attrs, socket) do
-    kept = Map.take(socket.assigns.persona.extensions, socket.assigns.missing_extensions)
+    kept = Map.take(socket.assigns.agent.extensions, socket.assigns.missing_extensions)
 
     enabled =
       for %{enabled: true} = ext <- socket.assigns.extensions, into: %{} do

@@ -1,16 +1,16 @@
 defmodule MeridianWeb.Me.SkillLive.Index do
   use MeridianWeb, :live_view
 
-  alias Meridian.{Personas, Skills}
+  alias Meridian.{Agents, Skills}
 
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_user
-    personas = Personas.list_personas(user)
+    agents = Agents.list_agents(user)
 
     skills =
       Enum.map(Skills.list_available(user), fn skill ->
-        %{skill: skill, personas: Enum.filter(personas, &(skill.id in &1.skills))}
+        %{skill: skill, agents: Enum.filter(agents, &(skill.id in &1.skills))}
       end)
 
     {:ok, assign(socket, page_title: "Skills", skills: skills)}
@@ -23,8 +23,8 @@ defmodule MeridianWeb.Me.SkillLive.Index do
       <.header>
         Skills
         <:subtitle>
-          Instructions for kinds of tasks: global skills, and your own. Turn one on for a persona
-          when editing that persona; the model loads it when a task calls for it.
+          Instructions for kinds of tasks: global skills, and your own. Turn one on for an agent
+          when editing that agent; the model loads it when a task calls for it.
         </:subtitle>
         <:actions>
           <.link navigate={~p"/me/skills/new"} class="btn btn-primary">New skill</.link>
@@ -38,9 +38,9 @@ defmodule MeridianWeb.Me.SkillLive.Index do
         </:col>
         <:col :let={row} label="Description">{row.skill.description}</:col>
         <:col :let={row} label="On for">
-          <span :if={row.personas == []} class="muted">nobody yet</span>
-          <%= for persona <- row.personas do %>
-            <.link navigate={~p"/me/personas/#{persona}/edit"}>{persona.name}</.link>{" "}
+          <span :if={row.agents == []} class="muted">nobody yet</span>
+          <%= for agent <- row.agents do %>
+            <.link navigate={~p"/me/agents/#{agent}/edit"}>{agent.name}</.link>{" "}
           <% end %>
         </:col>
       </.table>

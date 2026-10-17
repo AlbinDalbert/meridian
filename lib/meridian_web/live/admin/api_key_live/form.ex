@@ -1,7 +1,7 @@
 defmodule MeridianWeb.Admin.ApiKeyLive.Form do
   use MeridianWeb, :live_view
 
-  alias Meridian.{Accounts, Personas}
+  alias Meridian.{Accounts, Agents}
   alias Meridian.Accounts.ApiKey
 
   @impl true
@@ -15,7 +15,7 @@ defmodule MeridianWeb.Admin.ApiKeyLive.Form do
 
     socket
     |> assign(page_title: "Mint API key", user: user, api_key: api_key, minted: nil)
-    |> assign_personas()
+    |> assign_agents()
     |> assign(form: to_form(Accounts.change_api_key(api_key)))
   end
 
@@ -25,13 +25,13 @@ defmodule MeridianWeb.Admin.ApiKeyLive.Form do
 
     socket
     |> assign(page_title: "Edit #{api_key.name}", user: user, api_key: api_key, minted: nil)
-    |> assign_personas()
+    |> assign_agents()
     |> assign(form: to_form(Accounts.change_api_key(api_key)))
   end
 
-  defp assign_personas(socket) do
-    slugs = socket.assigns.user |> Personas.list_personas() |> Enum.map(& &1.slug)
-    assign(socket, persona_options: Enum.map(slugs, &{&1, &1}))
+  defp assign_agents(socket) do
+    slugs = socket.assigns.user |> Agents.list_agents() |> Enum.map(& &1.slug)
+    assign(socket, agent_options: Enum.map(slugs, &{&1, &1}))
   end
 
   @impl true
@@ -75,19 +75,19 @@ defmodule MeridianWeb.Admin.ApiKeyLive.Form do
         />
         <.inputs_for :let={policy} field={@form[:policy]}>
           <.input
-            field={policy[:allowed_personas]}
+            field={policy[:allowed_agents]}
             type="checkgroup"
-            label="Allowed crew"
-            options={@persona_options}
-            hint="None checked means the user's whole crew, including personas added later."
+            label="Allowed agents"
+            options={@agent_options}
+            hint="None checked means all of the user's agents, including ones added later."
           />
           <.input
-            field={policy[:default_persona]}
+            field={policy[:default_agent]}
             type="select"
-            label="Default persona"
-            prompt="The user's default persona"
-            options={@persona_options}
-            hint="Used when a client asks for a model that isn't a meridian/ persona."
+            label="Default agent"
+            prompt="The user's default agent"
+            options={@agent_options}
+            hint="Used when a client asks for a model that isn't a meridian/ agent."
           />
         </.inputs_for>
         <div class="form-actions">

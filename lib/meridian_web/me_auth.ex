@@ -1,6 +1,6 @@
 defmodule MeridianWeb.MeAuth do
   @moduledoc """
-  Sign-in sessions for `/me`, where users manage their own personas.
+  Sign-in sessions for `/me`, where users manage their own agents.
 
   Anyone with a Meridian user can sign in, through the OIDC provider, linked to their user the
   same way as every other sign-in (`Meridian.Accounts.user_for_identity/3`): there is no signup.

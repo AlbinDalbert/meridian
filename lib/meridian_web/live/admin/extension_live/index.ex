@@ -1,18 +1,18 @@
 defmodule MeridianWeb.Admin.ExtensionLive.Index do
   use MeridianWeb, :live_view
 
-  alias Meridian.{Extensions, Personas}
+  alias Meridian.{Extensions, Agents}
 
   @impl true
   def mount(_params, _session, socket) do
-    counts = Personas.count_by_extension()
+    counts = Agents.count_by_extension()
 
     extensions =
       Enum.map(Extensions.list_extensions(), fn extension ->
         %{
           extension: extension,
           description: Extensions.description(extension),
-          personas: Map.get(counts, extension.id, 0)
+          agents: Map.get(counts, extension.id, 0)
         }
       end)
 
@@ -26,7 +26,7 @@ defmodule MeridianWeb.Admin.ExtensionLive.Index do
       <.header>
         Extensions
         <:subtitle>
-          Lua scripts hooked into every run of the personas that turn them on. Global ones are for
+          Lua scripts hooked into every run of the agents that turn them on. Global ones are for
           everyone; users can also write their own.
         </:subtitle>
         <:actions>
@@ -47,12 +47,12 @@ defmodule MeridianWeb.Admin.ExtensionLive.Index do
             {row.extension.user.name}
           </.link>
         </:col>
-        <:col :let={row} label="Enabled on">{personas_text(row.personas)}</:col>
+        <:col :let={row} label="Enabled on">{agents_text(row.agents)}</:col>
       </.table>
     </Layouts.app>
     """
   end
 
-  defp personas_text(1), do: "1 persona"
-  defp personas_text(count), do: "#{count} personas"
+  defp agents_text(1), do: "1 agent"
+  defp agents_text(count), do: "#{count} agents"
 end

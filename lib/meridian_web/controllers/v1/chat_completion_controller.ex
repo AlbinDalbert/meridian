@@ -1,6 +1,6 @@
 defmodule MeridianWeb.V1.ChatCompletionController do
   @moduledoc """
-  `POST /v1/chat/completions`: the persona proxy.
+  `POST /v1/chat/completions`: the agent proxy.
 
   The upstream response is relayed as it arrives, with the upstream's status and content type,
   so streaming (SSE) and non-streaming requests take the same path. If the client disconnects,

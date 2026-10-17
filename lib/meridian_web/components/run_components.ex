@@ -1,7 +1,7 @@
 defmodule MeridianWeb.RunComponents do
   @moduledoc """
   Components for showing runs in the admin console: only what happened and how much it cost,
-  never what was said (no thread titles, personas, or messages).
+  never what was said (no thread titles, agents, or messages).
   """
   use Phoenix.Component
 

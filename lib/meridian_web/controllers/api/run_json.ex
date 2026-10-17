@@ -16,7 +16,7 @@ defmodule MeridianWeb.Api.RunJSON do
       thread_id: run.thread_id,
       user_message_id: run.user_message_id,
       status: run.status,
-      persona: "meridian/" <> run.persona_snapshot["slug"],
+      agent: "meridian/" <> run.agent_snapshot["slug"],
       model: run.model,
       usage: run.usage,
       error: run.error,

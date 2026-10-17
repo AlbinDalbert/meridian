@@ -1,8 +1,8 @@
-defmodule MeridianWeb.Admin.PersonaLive.Form do
+defmodule MeridianWeb.Admin.AgentLive.Form do
   use MeridianWeb, :live_view
 
-  alias Meridian.{Accounts, Personas}
-  alias Meridian.Personas.Persona
+  alias Meridian.{Accounts, Agents}
+  alias Meridian.Agents.Agent
 
   @impl true
   def mount(params, _session, socket) do
@@ -11,13 +11,13 @@ defmodule MeridianWeb.Admin.PersonaLive.Form do
 
   defp apply_action(socket, :new, %{"user_id" => user_id}) do
     user = Accounts.get_user!(user_id)
-    assign(socket, page_title: "New persona", user: user, persona: %Persona{user_id: user.id})
+    assign(socket, page_title: "New agent", user: user, agent: %Agent{user_id: user.id})
   end
 
   defp apply_action(socket, :edit, %{"id" => id}) do
-    persona = Personas.get_persona!(id)
-    user = Accounts.get_user!(persona.user_id)
-    assign(socket, page_title: "Edit #{persona.slug}", user: user, persona: persona)
+    agent = Agents.get_agent!(id)
+    user = Accounts.get_user!(agent.user_id)
+    assign(socket, page_title: "Edit #{agent.slug}", user: user, agent: agent)
   end
 
   @impl true
@@ -30,9 +30,9 @@ defmodule MeridianWeb.Admin.PersonaLive.Form do
       </.header>
 
       <.live_component
-        module={MeridianWeb.PersonaFormComponent}
-        id="persona"
-        persona={@persona}
+        module={MeridianWeb.AgentFormComponent}
+        id="agent"
+        agent={@agent}
         user={@user}
         return_to={~p"/admin/users/#{@user}"}
         model_error_hint="Couldn't list upstream models; check LLM_BASE_URL."

@@ -6,12 +6,12 @@ defmodule Meridian.SkillsTest do
 
   @moduletag :capture_log
 
-  alias Meridian.{Personas, Runs, Skills}
+  alias Meridian.{Agents, Runs, Skills}
   alias Meridian.Runs.Worker
 
   setup do
     user = user_fixture(%{}, %{"model" => "qwen", "system_prompt" => "Be brief."})
-    %{user: user, persona: Personas.get_default_persona(user)}
+    %{user: user, agent: Agents.get_default_agent(user)}
   end
 
   defp skill_fixture(owner, attrs) do
@@ -31,9 +31,9 @@ defmodule Meridian.SkillsTest do
     skill
   end
 
-  defp enable(persona, skills) do
-    {:ok, persona} = Personas.update_persona(persona, %{"skills" => Enum.map(skills, & &1.id)})
-    persona
+  defp enable(agent, skills) do
+    {:ok, agent} = Agents.update_agent(agent, %{"skills" => Enum.map(skills, & &1.id)})
+    agent
   end
 
   test "skills are checked when saved" do
@@ -55,32 +55,32 @@ defmodule Meridian.SkillsTest do
     assert errors_on(changeset).name == ["has already been taken"]
   end
 
-  test "a persona gets the skills it enables that its user can use", %{
+  test "an agent gets the skills it enables that its user can use", %{
     user: user,
-    persona: persona
+    agent: agent
   } do
     global = skill_fixture(nil, %{"name" => "sql"})
     own = skill_fixture(user, %{"name" => "sql", "prompt" => "My way."})
     other = skill_fixture(user_fixture(), %{"name" => "theirs"})
     unused = skill_fixture(nil, %{"name" => "unused"})
 
-    persona = enable(persona, [global, own, other])
+    agent = enable(agent, [global, own, other])
 
     # The user's own shadows the global one with the same name; someone else's is ignored.
-    assert [%{id: id}] = Skills.enabled(persona)
+    assert [%{id: id}] = Skills.enabled(agent)
     assert id == own.id
 
     assert Enum.map(Skills.list_available(user), & &1.id) |> Enum.sort() ==
              Enum.sort([global.id, own.id, unused.id])
 
-    # Ids of skills that are gone are kept on the persona.
+    # Ids of skills that are gone are kept on the agent.
     {:ok, _} = Skills.delete_skill(own)
-    persona = Personas.get_persona!(persona.id)
-    assert own.id in persona.skills
-    assert Enum.map(Skills.enabled(persona), & &1.id) == [global.id]
+    agent = Agents.get_agent!(agent.id)
+    assert own.id in agent.skills
+    assert Enum.map(Skills.enabled(agent), & &1.id) == [global.id]
   end
 
-  test "recommended extensions that a persona doesn't enable", %{user: user} do
+  test "recommended extensions that an agent doesn't enable", %{user: user} do
     curl = extension_fixture(nil, "return {}")
     other = extension_fixture(user_fixture(), "return {}")
     skill = skill_fixture(nil, %{"recommended_extensions" => [curl.id, other.id]})
@@ -95,7 +95,7 @@ defmodule Meridian.SkillsTest do
 
   test "a run lists the skills, and the model loads one with load_skill", %{
     user: user,
-    persona: persona
+    agent: agent
   } do
     sql =
       skill_fixture(nil, %{
@@ -104,7 +104,7 @@ defmodule Meridian.SkillsTest do
         "prompt" => "Use read-only queries."
       })
 
-    enable(persona, [sql, skill_fixture(nil, %{"name" => "maps"})])
+    enable(agent, [sql, skill_fixture(nil, %{"name" => "maps"})])
 
     thread = thread_fixture(user)
     {_message, run} = message_fixture(thread, "How many users?")

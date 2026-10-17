@@ -6,7 +6,7 @@ defmodule Meridian.RunsTest do
 
   @moduletag :capture_log
 
-  alias Meridian.{Personas, Runs, Threads}
+  alias Meridian.{Agents, Runs, Threads}
   alias Meridian.Runs.{Run, Worker}
 
   setup do
@@ -14,8 +14,8 @@ defmodule Meridian.RunsTest do
 
     {:ok, _} =
       user
-      |> Personas.get_default_persona()
-      |> Personas.update_persona(%{"system_prompt" => "Be brief.", "params" => %{"top_p" => 0.9}})
+      |> Agents.get_default_agent()
+      |> Agents.update_agent(%{"system_prompt" => "Be brief.", "params" => %{"top_p" => 0.9}})
 
     %{user: user, thread: thread_fixture(user)}
   end
@@ -110,13 +110,13 @@ defmodule Meridian.RunsTest do
     assert Threads.Message.to_upstream(reply) == %{"role" => "assistant", "content" => "Answer"}
   end
 
-  test "the persona is frozen when the run is created", %{user: user, thread: thread} do
+  test "the agent is frozen when the run is created", %{user: user, thread: thread} do
     {_message, run} = message_fixture(thread)
 
     {:ok, _} =
       user
-      |> Personas.get_default_persona()
-      |> Personas.update_persona(%{"model" => "other"}, force: true)
+      |> Agents.get_default_agent()
+      |> Agents.update_agent(%{"model" => "other"}, force: true)
 
     stub_upstream_stream(completion_events(["ok"]))
     :ok = execute(run)

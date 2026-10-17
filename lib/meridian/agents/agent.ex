@@ -1,9 +1,9 @@
-defmodule Meridian.Personas.Persona do
+defmodule Meridian.Agents.Agent do
   @moduledoc """
   A named bundle of system prompt, upstream model, and default params, presented to clients as
   the model `meridian/<slug>`.
 
-  `extensions` maps the id of each extension the persona enables to its settings (see
+  `extensions` maps the id of each extension the agent enables to its settings (see
   `Meridian.Extensions`). `skills` lists the ids of the skills it enables (see
   `Meridian.Skills`).
   """
@@ -15,7 +15,7 @@ defmodule Meridian.Personas.Persona do
 
   @type t :: %__MODULE__{}
 
-  schema "personas" do
+  schema "agents" do
     field :slug, :string
     field :name, :string
     field :system_prompt, :string, default: ""
@@ -31,8 +31,8 @@ defmodule Meridian.Personas.Persona do
   end
 
   @doc false
-  def changeset(persona, attrs) do
-    persona
+  def changeset(agent, attrs) do
+    agent
     |> cast(attrs, [:slug, :name, :system_prompt, :model, :params, :extensions, :skills],
       empty_values: [nil]
     )
@@ -52,10 +52,10 @@ defmodule Meridian.Personas.Persona do
     end)
     |> validate_change(:extensions, fn :extensions, extensions ->
       extensions
-      |> Meridian.Extensions.settings_errors(persona.user_id)
+      |> Meridian.Extensions.settings_errors(agent.user_id)
       |> Enum.map(&{:extensions, &1})
     end)
-    |> unique_constraint(:slug, name: :personas_user_id_slug_index)
+    |> unique_constraint(:slug, name: :agents_user_id_slug_index)
   end
 
   # `cast` keeps "" (so a system prompt can be cleared), which `validate_required` then
@@ -68,11 +68,11 @@ defmodule Meridian.Personas.Persona do
     end)
   end
 
-  @doc "The model id clients use to select this persona."
+  @doc "The model id clients use to select this agent."
   def model_id(%__MODULE__{slug: slug}), do: @model_prefix <> slug
 
   @doc """
-  Extracts the persona slug from a model id, or returns `:error` if the id isn't a persona id.
+  Extracts the agent slug from a model id, or returns `:error` if the id isn't an agent id.
   """
   def slug_from_model_id(@model_prefix <> slug) when slug != "", do: {:ok, slug}
   def slug_from_model_id(_model_id), do: :error
@@ -80,13 +80,13 @@ defmodule Meridian.Personas.Persona do
   @snapshot_fields ~w(id user_id slug name system_prompt model params extensions skills)a
 
   @doc """
-  The persona's configuration as a plain map, for freezing into a run (`runs.persona_snapshot`).
+  The agent's configuration as a plain map, for freezing into a run (`runs.agent_snapshot`).
   """
-  def snapshot(%__MODULE__{} = persona) do
-    Map.new(@snapshot_fields, fn field -> {Atom.to_string(field), Map.fetch!(persona, field)} end)
+  def snapshot(%__MODULE__{} = agent) do
+    Map.new(@snapshot_fields, fn field -> {Atom.to_string(field), Map.fetch!(agent, field)} end)
   end
 
-  @doc "Rebuilds a (non-persisted) persona from `snapshot/1`."
+  @doc "Rebuilds a (non-persisted) agent from `snapshot/1`."
   def from_snapshot(%{} = snapshot) do
     fields = for field <- @snapshot_fields, do: {field, Map.get(snapshot, Atom.to_string(field))}
     # Runs from before skills existed have none.

@@ -1,7 +1,7 @@
 defmodule MeridianWeb.Admin.ExtensionLive.Form do
   use MeridianWeb, :live_view
 
-  alias Meridian.{Extensions, Personas}
+  alias Meridian.{Extensions, Agents}
   alias Meridian.Extensions.Extension
 
   @impl true
@@ -28,7 +28,7 @@ defmodule MeridianWeb.Admin.ExtensionLive.Form do
       extension: extension,
       last_error: Extensions.last_error(extension),
       tools: Extensions.tools(extension),
-      personas: Map.get(Personas.count_by_extension(), extension.id, 0)
+      agents: Map.get(Agents.count_by_extension(), extension.id, 0)
     )
   end
 
@@ -43,7 +43,7 @@ defmodule MeridianWeb.Admin.ExtensionLive.Form do
       <.header>
         {@page_title}
         <:subtitle :if={is_nil(@extension.id)}>
-          A global extension: every user can turn it on for their personas.
+          A global extension: every user can turn it on for their agents.
         </:subtitle>
         <:subtitle :if={@extension.id}>
           <%= if @extension.user do %>
@@ -52,7 +52,7 @@ defmodule MeridianWeb.Admin.ExtensionLive.Form do
           <% else %>
             Global.
           <% end %>
-          Enabled on {@personas} {if @personas == 1, do: "persona", else: "personas"}.
+          Enabled on {@agents} {if @agents == 1, do: "agent", else: "agents"}.
         </:subtitle>
       </.header>
 

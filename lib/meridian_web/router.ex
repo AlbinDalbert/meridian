@@ -74,7 +74,7 @@ defmodule MeridianWeb.Router do
   scope "/api", MeridianWeb.Api do
     pipe_through :api
 
-    get "/personas", PersonaController, :index
+    get "/agents", AgentController, :index
     resources "/threads", ThreadController, except: [:new, :edit]
     get "/threads/:thread_id/messages", MessageController, :index
     post "/threads/:thread_id/messages", MessageController, :create
@@ -112,11 +112,11 @@ defmodule MeridianWeb.Router do
       live "/users/:id/edit", UserLive.Form, :edit
       live "/users/:user_id/keys/new", ApiKeyLive.Form, :new
       live "/keys/:id/edit", ApiKeyLive.Form, :edit
-      live "/users/:user_id/personas/new", PersonaLive.Form, :new
-      live "/personas/:id/edit", PersonaLive.Form, :edit
+      live "/users/:user_id/agents/new", AgentLive.Form, :new
+      live "/agents/:id/edit", AgentLive.Form, :edit
       live "/runs", RunLive.Index, :index
       live "/runs/:id", RunLive.Show, :show
-      live "/crew", CrewLive.Index, :index
+      live "/agents", AgentLive.Index, :index
       live "/extensions", ExtensionLive.Index, :index
       live "/extensions/new", ExtensionLive.Form, :new
       live "/extensions/:id", ExtensionLive.Form, :edit
@@ -143,9 +143,9 @@ defmodule MeridianWeb.Router do
     get "/extensions/:id/export", ExtensionController, :export
 
     live_session :me, on_mount: [{MeridianWeb.MeAuth, :require_user}, MeridianWeb.Nav] do
-      live "/", PersonaLive.Index, :index
-      live "/personas/new", PersonaLive.Form, :new
-      live "/personas/:id/edit", PersonaLive.Form, :edit
+      live "/", AgentLive.Index, :index
+      live "/agents/new", AgentLive.Form, :new
+      live "/agents/:id/edit", AgentLive.Form, :edit
       live "/extensions", ExtensionLive.Index, :index
       live "/extensions/new", ExtensionLive.Form, :new
       live "/extensions/:id", ExtensionLive.Form, :edit

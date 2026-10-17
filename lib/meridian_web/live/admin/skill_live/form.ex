@@ -1,7 +1,7 @@
 defmodule MeridianWeb.Admin.SkillLive.Form do
   use MeridianWeb, :live_view
 
-  alias Meridian.{Personas, Skills}
+  alias Meridian.{Agents, Skills}
   alias Meridian.Skills.Skill
 
   @impl true
@@ -21,7 +21,7 @@ defmodule MeridianWeb.Admin.SkillLive.Form do
       page_title: skill.name,
       skill: skill,
       owner: skill.user,
-      personas: Map.get(Personas.count_by_skill(), skill.id, 0)
+      agents: Map.get(Agents.count_by_skill(), skill.id, 0)
     )
   end
 
@@ -32,7 +32,7 @@ defmodule MeridianWeb.Admin.SkillLive.Form do
       <.header>
         {@page_title}
         <:subtitle :if={is_nil(@skill.id)}>
-          A global skill: every user can turn it on for their personas.
+          A global skill: every user can turn it on for their agents.
         </:subtitle>
         <:subtitle :if={@skill.id}>
           <%= if @skill.user do %>
@@ -40,7 +40,7 @@ defmodule MeridianWeb.Admin.SkillLive.Form do
           <% else %>
             Global.
           <% end %>
-          Enabled on {@personas} {if @personas == 1, do: "persona", else: "personas"}.
+          Enabled on {@agents} {if @agents == 1, do: "agent", else: "agents"}.
         </:subtitle>
       </.header>
 

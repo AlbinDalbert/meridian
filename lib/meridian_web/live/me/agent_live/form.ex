@@ -1,8 +1,8 @@
-defmodule MeridianWeb.Me.PersonaLive.Form do
+defmodule MeridianWeb.Me.AgentLive.Form do
   use MeridianWeb, :live_view
 
-  alias Meridian.Personas
-  alias Meridian.Personas.Persona
+  alias Meridian.Agents
+  alias Meridian.Agents.Agent
 
   @impl true
   def mount(params, _session, socket) do
@@ -10,14 +10,14 @@ defmodule MeridianWeb.Me.PersonaLive.Form do
   end
 
   defp apply_action(socket, :new, _params) do
-    persona = %Persona{user_id: socket.assigns.current_user.id}
-    assign(socket, page_title: "New persona", persona: persona)
+    agent = %Agent{user_id: socket.assigns.current_user.id}
+    assign(socket, page_title: "New agent", agent: agent)
   end
 
-  # Only the signed-in user's own personas: anyone else's id raises, which is a 404.
+  # Only the signed-in user's own agents: anyone else's id raises, which is a 404.
   defp apply_action(socket, :edit, %{"id" => id}) do
-    persona = Personas.get_persona!(socket.assigns.current_user, id)
-    assign(socket, page_title: "Edit #{persona.slug}", persona: persona)
+    agent = Agents.get_agent!(socket.assigns.current_user, id)
+    assign(socket, page_title: "Edit #{agent.slug}", agent: agent)
   end
 
   @impl true
@@ -27,9 +27,9 @@ defmodule MeridianWeb.Me.PersonaLive.Form do
       <.header>{@page_title}</.header>
 
       <.live_component
-        module={MeridianWeb.PersonaFormComponent}
-        id="persona"
-        persona={@persona}
+        module={MeridianWeb.AgentFormComponent}
+        id="agent"
+        agent={@agent}
         user={@current_user}
         return_to={~p"/me"}
         model_error_hint="Couldn't list the upstream's models right now."

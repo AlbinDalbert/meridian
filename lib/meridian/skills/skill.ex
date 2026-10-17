@@ -5,7 +5,7 @@ defmodule Meridian.Skills.Skill do
   by everyone; a user's own skills only by that user.
 
   `recommended_extensions` lists the ids of extensions the skill works best with. It's a hint
-  for whoever sets up a persona, not a requirement.
+  for whoever sets up an agent, not a requirement.
   """
   use Meridian.Schema
 

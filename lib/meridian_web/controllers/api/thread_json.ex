@@ -1,5 +1,5 @@
 defmodule MeridianWeb.Api.ThreadJSON do
-  alias Meridian.Personas.Persona
+  alias Meridian.Agents.Agent
   alias Meridian.Threads.Thread
   alias MeridianWeb.Api.RunJSON
 
@@ -14,7 +14,7 @@ defmodule MeridianWeb.Api.ThreadJSON do
     %{
       id: thread.id,
       title: thread.title,
-      persona: thread.persona && Persona.model_id(thread.persona),
+      agent: thread.agent && Agent.model_id(thread.agent),
       inserted_at: thread.inserted_at,
       updated_at: thread.updated_at
     }
