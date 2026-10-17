@@ -1,958 +1,288 @@
 # Meridian — Design
 
-> Status: draft / v0 planning. Nothing here is final; open questions are collected at the end.
->
-> This document is a **direction, not a spec**. We build in thin, usable slices and let real
-> features pull abstractions into existence. When the code and this doc disagree, we update
-> whichever one is wrong, deliberately.
+Meridian is a self-hostable **agent layer** between clients and any OpenAI-compatible inference
+endpoint. It owns users, agents, conversations, and the run lifecycle, and is extended with
+sandboxed Lua scripts. The inference backend is a dumb, stateless model endpoint.
 
-Meridian is a self-hostable **agent layer** that sits between clients and any OpenAI-compatible
-inference endpoint. It owns identity, conversations, agents, and the agent run lifecycle, and
-it is built to be **extended**. The inference backend is treated as a dumb, stateless model
-endpoint.
+To a client, Meridian looks like an inference endpoint, except that **your credential carries
+you**: your agents, your threads, and whatever your extensions add.
 
-From a client's point of view Meridian looks like an inference endpoint. The difference is that
-**your API key carries *you***: your agents, your threads, and whatever your extensions add
-(memory, tools, skills, ...).
+This doc describes how things are and why. When it and the code disagree, fix whichever is
+wrong. Module docs hold the details; this is the map.
 
-## Goals
+## Principles
 
-- **Durable conversations.** A response being generated must not depend on the client staying
-  connected. Generation happens server-side; clients subscribe to it and can leave and come back.
-- **Works with generic clients.** Any client that speaks the OpenAI Chat Completions API can use
-  Meridian and get agents for free.
-- **A richer native API** for first-party clients: server-side threads, durable runs, resumable
-  event streams (SSE and WebSocket), multi-device.
-- **Extensible by design.** The core is a small run lifecycle with hooks. Memory, tools, skills,
-  and features we haven't thought of yet are extensions, not core rewrites.
-- **Backend-agnostic and environment-agnostic.** No assumptions about where it runs or which
-  inference server sits behind it. Everything is configured at deploy time.
-
-## Non-goals (for now)
-
-- Running models / being an inference server.
-- Multi-agent orchestration (planners, sub-agents, agent-to-agent). The run model leaves room for
-  it (`parent_run_id`), but it is out of scope.
-- Autonomous / proactive behaviour. Meridian acts when a client calls it. Scheduled runs may come
-  later (and could be an extension).
-- Committing to a memory design. Memory is deliberately left to extensions (see
-  [Memory](#memory)).
-- Multi-tenant SaaS concerns (billing, signup flows, org management).
+- **Durable runs.** Generation happens server-side and doesn't depend on the client staying
+  connected. Clients subscribe, leave, and come back.
+- **Small core, extensible edges.** The core knows runs, threads, agents, skills, and the hook
+  pipeline. Features like memory are extensions; if one can't be written, the extension API is
+  missing something.
+- **Processes for isolation.** Every run, upstream request, tool call, and script call is its
+  own process. Something that hangs or crashes takes down only itself.
+- **The operator never reads conversations.** The admin console shows usage and run metadata,
+  never content.
+- **Generic and environment-agnostic.** The repo is public; everything deployment-specific is
+  an env var.
+- **Domain/web boundary.** `lib/meridian/` never depends on `lib/meridian_web/`.
 
 ## Stack
 
-| Concern            | Choice                                   |
-|--------------------|------------------------------------------|
-| Language / runtime | Elixir on the BEAM (OTP)                 |
-| Web                | Phoenix (API + Channels), LiveView for the admin UI |
-| Database           | PostgreSQL (+ `pgvector` available for extensions that want it) |
-| Jobs / queue       | Oban (Postgres-backed)                   |
-| Fan-out            | Phoenix.PubSub                           |
-| HTTP client        | Req (with SSE parsing for streaming)     |
-| Packaging          | `mix release` in a multi-arch (amd64 + arm64) container image |
+Elixir/OTP, Phoenix (JSON APIs + LiveView with no asset build), Postgres, Oban (jobs, on
+Postgres), Phoenix.PubSub (fan-out), Req (HTTP), the `lua` package (scripts, Lua 5.3 in pure
+Elixir). Shipped as a `mix release` in a multi-arch container image.
 
-Why Elixir: the core problem is long-lived, concurrent, crash-tolerant sessions that outlive
-their client connections and fan out to multiple subscribers. That is what OTP is built for.
-
-## Architecture overview
+## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Clients
-        C1[Generic OpenAI client<br/>chat UI, coding agent]
-        C2[First-party client]
-        C3[Operator's browser]
-    end
-
-    subgraph Meridian
-        Admin["/admin<br/>LiveView"]
-        Auth[Auth<br/>API key → user + policy]
-        Compat["/v1/* <br/>stateless surface"]
-        Native["/api/* + /socket <br/>stateful surface"]
-        Runs[Run supervisor<br/>RunServer per active run]
-        Hooks[Hook pipeline]
-        Ext[Extensions<br/>Lua scripts in the DB]
-        Oban[(Oban jobs)]
-        PubSub{{PubSub}}
-    end
-
-    DB[(Postgres)]
-    LLM[OpenAI-compatible<br/>inference endpoint]
-
-    C1 --> Auth --> Compat --> LLM
-    C2 --> Auth --> Native
-    Native --> Oban --> Runs
-    Runs <--> Hooks <--> Ext
-    Runs --> LLM
-    Runs --> PubSub --> Native
-    Runs --> DB
-    Ext --> DB
-    Oban --> DB
-    C3 --> Admin --> DB
-    Admin -.-> PubSub
+    Clients --> V1["/v1 (stateless proxy)"] --> LLM[Upstream LLM]
+    Clients --> API["/api (threads, runs, SSE)"] --> Oban --> RS[RunServer per run]
+    RS <--> Ext[Lua extensions & skills]
+    RS --> LLM
+    RS --> PubSub --> API
+    RS --> DB[(Postgres)]
+    Browser --> Admin["/admin, /me (LiveView)"] --> DB
 ```
 
-## The two surfaces
+## Surfaces
 
-### 1. Stateless: `/v1/*` (OpenAI-compatible)
+### `/v1`: OpenAI-compatible proxy
 
-Deliberately dead simple: **an agent-aware proxy**. The client owns the conversation history
-and the tool loop, exactly as with any OpenAI endpoint.
+An agent-aware proxy. The client owns history and the tool loop. No extensions, no
+persistence.
 
-- `GET /v1/models`: lists **agents** as models (e.g. `meridian/default`, `meridian/coder`).
-  Optionally also passes through raw upstream models (`EXPOSE_UPSTREAM_MODELS`).
-- `POST /v1/chat/completions`: streaming and non-streaming.
+- `GET /v1/models` lists agents as `meridian/<slug>` (plus raw upstream models if
+  `EXPOSE_UPSTREAM_MODELS`).
+- `POST /v1/chat/completions` resolves the agent from `model`, merges the agent's system prompt
+  first into the leading system message, applies the agent's params as defaults (client values
+  win), and relays the upstream response byte for byte. A client disconnect cancels upstream.
+- Model resolution: `meridian/<slug>` → that agent (404 if unknown); a raw upstream id →
+  passthrough when exposed; anything else → the key's `default_agent`, else the user's default.
 
-Request handling:
+### `/api`: native, stateful
 
-1. Authenticate the key; resolve the agent from `model` (subject to key policy).
-2. Prepend/append the agent's system prompt, apply its upstream model and default params.
-3. Forward to upstream unchanged otherwise. Client tools pass through untouched.
-4. Stream the response back. A client disconnect cancels the upstream request.
+| Route | Purpose |
+|---|---|
+| `GET /api/agents` | The user's agents |
+| `/api/threads` (CRUD) | Threads |
+| `GET/POST /api/threads/:id/messages` | History / send a message → `{message, run}` immediately |
+| `GET /api/runs/:id`, `POST /api/runs/:id/cancel` | Run status / cancel |
+| `GET /api/runs/:id/events` | SSE, resumable via `Last-Event-ID` or `?after=` |
+| `/api/auth/*` | Sign-in for browser apps (see Identity) |
 
-No server tools, no memory, no skills, no hook pipeline, no persistence. Extensions do not run on
-this surface in v0. (Whether a small subset of hooks should run here is an open question.)
+- One active run per thread (partial unique index). Sending while busy is a `409`; so is
+  deleting a thread with an active run.
+- Errors use the OpenAI shape: `{"error": {"message", "type", "code"}}`.
+- Browser apps are first-class: CORS from `CORS_ALLOWED_ORIGINS` (never with credentials).
+  `EventSource` can't send headers, so runs carry an `events_token` (signed, one run, one hour)
+  accepted as `?token=`. A finished run's stream answers a reconnect with `204` so
+  `EventSource` stops.
 
-### 2. Stateful: `/api/*` + `/socket` (native)
+## Runs
 
-For first-party clients. The server owns threads, history, and the run lifecycle. The full
-extension pipeline runs here.
+A **run** is one agent turn: user message → final assistant message. Each model call plus the
+tool calls it asks for is a **step**.
 
-REST:
+`queued → running → completed | failed | cancelled` (`awaiting_approval` exists, unused).
 
-| Method & path                         | Purpose |
-|---------------------------------------|---------|
-| `GET/POST /api/threads`               | List / create threads |
-| `GET/PATCH/DELETE /api/threads/:id`   | Read / update (title, agent, settings) / delete |
-| `GET /api/threads/:id/messages`       | Paginated history |
-| `POST /api/threads/:id/messages`      | Add a user message → returns `{message, run}` immediately |
-| `GET /api/runs/:id`                   | Run status + usage |
-| `GET /api/runs/:id/events`            | **SSE** event stream, resumable via `Last-Event-ID` / `?after=seq` |
-| `POST /api/runs/:id/cancel`           | Cancel a run |
-| `GET /api/threads/:id/events`         | SSE stream of all run events for a thread |
-| `GET/POST/PATCH/DELETE /api/agents` | Manage agents |
-| `GET /api/models`                     | Upstream models (cached), for building agents |
-| `GET/POST/DELETE /api/keys`           | Mint / revoke API keys for yourself |
-| `/api/ext/:extension/*`               | Routes mounted by extensions |
+1. `POST /messages` inserts the message and a queued run in one transaction and enqueues an
+   Oban job (`Runs.Worker`), which starts a `RunServer` and lives as long as it.
+2. The `RunServer` snapshots the agent, calls hooks, streams from the upstream through a
+   separate process (`Upstream.Stream`) that forwards chunks as messages, runs tool calls in
+   their own tasks, and repeats until the model answers without tools or `:max_steps` (10) is
+   hit.
+3. Everything is an **event** with a per-run `seq`: persisted to `run_events`, then broadcast
+   on `run:<id>` and `thread:<id>`. Text deltas are coalesced (~100 ms) before both, so live
+   and replaying clients see identical events. Types: `run.*`, `message.delta`,
+   `message.completed`, `tool_call.started`, `tool_call.completed`.
+4. Subscribers subscribe first, replay from Postgres, then drop live events already replayed.
 
-`POST /api/threads/:id/messages` accepts `if_busy: "queue" | "interrupt" | "reject"` for when the
-thread already has an active run (default: `reject` with `409`). *Slice 2 implements only
-`reject`; `GET /api/threads/:id/events`, agents, models, keys, and extension routes are not
-built yet.*
+**Completion is strict:** a reply is saved as completed only if the upstream sent a
+`finish_reason`. A truncated stream or invalid event fails the run.
 
-WebSocket (Phoenix Channels at `/socket`, authenticated with an API key). *Not planned yet: no
-client needs it; REST + SSE covers durable runs.*
+**Failure:** runs aren't retried or resumed. Three layers make sure no run is left hanging: the
+`RunServer` traps exits and fails the run in `terminate/2`; the worker fails it if the
+`RunServer` dies; a janitor fails runs whose heartbeat is older than 60 s (dead node).
 
-- Join `thread:<id>` (optionally with `last_seq` per run) → replay missed events, then receive
-  live events for every run on that thread.
-- Join `run:<id>` with `last_seq` → same, scoped to one run.
-- Client → server messages on the thread channel: `send_message`, `cancel`, and later `approve` /
-  `deny` for tool approval.
+**Cancel** goes over PubSub (works across nodes). The partial reply is kept as the assistant
+message with `finish_reason: "cancelled"`.
 
-**Browser clients are first-class.** CORS for `/v1` and `/api` is configured by
-`CORS_ALLOWED_ORIGINS`. Since `EventSource` can't send an `Authorization` header, every run in
-an API response carries an `events_token` (signed, valid for that run's events only, one hour,
-tied to the issuing key) accepted as `?token=` on `GET /api/runs/:id/events`. A reconnect to a
-finished run with nothing left to send gets `204`, so `EventSource` stops instead of
-reconnecting forever.
+**History rules:** reasoning is stored as a content part and never sent back upstream; a tool
+call with no saved result is sent upstream as interrupted, so history is always valid.
 
-SSE and Channels are two transports over the same event log and PubSub topics. Neither has
-special semantics. SSE exists for simple clients and curl; Channels for rich clients that want
-bidirectional communication on one connection.
+## Extensions
 
-A future option is to also expose this surface as the **OpenAI Responses API**
-(`previous_response_id`, `background: true`), which maps closely onto threads + runs.
+An extension is a Lua script stored in the database, edited in the browser, and enabled per
+agent. The script returns a table with hooks, `jobs`, `tools`, `settings`, and `validate`. See
+`Meridian.Extensions.Script` for the shape and `Meridian.Extensions.Capabilities` for the
+`meridian` table.
 
-## Admin UI
+- **Ownership.** Global (made in `/admin`) or a user's own (made in `/me`). Admins can read and
+  edit all; users can read global ones.
+- **Enablement.** `agents.extensions` maps extension id → settings; present means enabled, and
+  nothing is on by default. Settings are frozen in the run's agent snapshot. Scripts are not:
+  a saved script is used from the next call. Missing ids are kept and ignored.
+- **Sandbox.** Scripts reach Meridian only through the `meridian` table, always scoped to the
+  user the call runs for. Every call runs in its own process, starting from the script's
+  loaded state (nothing carries over), with a timeout, a heap cap, and an instruction budget
+  (2M). Loaded scripts are cached per node by source hash.
+- **Failure.** A crashing or hanging handler is logged, shown on the extension's page, and
+  skipped (fail-open), except `tool_call`, which blocks the call (fail-closed). A script never
+  takes down a run.
 
-A small **LiveView** app mounted at `/admin`, inside the same release. It is an operator console,
-not a chat client.
+### Hooks
 
-Navigation is a sidebar in two groups. **Operate** is the console's own: users, access
-requests, runs. **Configure** is the group `/me` has too: agents (every user's agents, at
-`/admin/agents`), skills, MCPs, and extensions (every extension, global and users' own, how many
-agents enable each, and the script editor). The pages behind an entry differ between the two areas, but the entries match, so the
-console reads as `/me` plus operating. MCPs are listed as "soon" until they exist.
+Called from the `RunServer` (and `run_end` from wherever the run ended, after commit), in
+extension name order. Chained hooks return the changed value or nothing.
 
-- **Manage**: users, API keys (mint / revoke), agents.
-- **Observe**: how Meridian is used, **never what is said**. Per user: how many threads,
-  messages, and runs, the tokens used, and when they were last active. Per run: who, status,
-  upstream model, timings, usage, the error code, and a **live event log by type and time**
-  (LiveView subscribes to the same PubSub topics as API clients), which is enough to see runs
-  and extensions working. Thread titles, agent names in conversations, messages, replies, and
-  event payloads (deltas, tool calls, what extensions recalled) are never shown; there is no
-  thread view.
-- **Extensions** can mount their own admin pages, under the same rule: no conversation
-  contents (so a memory extension's admin page shows counts, not memories).
+| Hook | Gets / may change | Per |
+|---|---|---|
+| `run_start` | Observe | run |
+| `before_run` | System prompt sections, params, tool set (may remove or reword tools, not add). May reject the run | run |
+| `context` | History about to be sent (inject, trim, rewrite) | step |
+| `before_model_request` | Final request body | step |
+| `tool_call` | Name + arguments. May block | tool call |
+| `tool_result` | Result text | tool call |
+| `message_end` | Finished assistant message content | message |
+| `step_end` | Observe | step |
+| `run_end` | Observe; enqueue jobs | run |
+| `thread_created`, `thread_deleted` | Observe (agent's current settings) | thread |
 
-### Admin authentication
-
-Admin access belongs to the **operator of the deployment**, not to a Meridian user, so it uses
-its own credentials. Either or both of these can be enabled; with neither, `/admin` is disabled
-entirely.
-
-- **Sign-in with the OIDC provider** (`OIDC_ISSUER`, `OIDC_CLIENT_ID`, optional
-  `OIDC_CLIENT_SECRET`, `ADMIN_EMAILS`): authorization code flow with PKCE, `state`, and
-  `nonce`. The ID token is verified (signature, issuer, audience, nonce); the operator gets in if
-  the verified email is in `ADMIN_EMAILS`. The session stores the email, so removing it from
-  `ADMIN_EMAILS` logs them out. Being able to sign in to the provider is not enough: the
-  allowlist is what makes someone an operator.
-- **`ADMIN_TOKEN`**: a long random secret provided by the deployment (e.g. a Kubernetes Secret,
-  generated with `openssl rand -base64 48`), pasted into the login form and compared in constant
-  time. Useful as a fallback when the provider is down. Sessions carry a hash of the token, so
-  rotating it logs everyone out.
-
-Either way the result is a signed, short-lived (12 h) session cookie scoped to `/admin`. Cookie
-sessions exist only in the admin pipeline; the APIs stay bearer-only. The session cookie is
-`SameSite=Strict`, which isn't sent on the provider's redirect back to the callback, so the
-in-flight login (`state`, `nonce`, PKCE verifier) lives in its own short-lived, encrypted,
-`SameSite=Lax` cookie, and the callback moves into the console with a same-site navigation (a
-meta refresh) rather than a redirect.
-
-This also solves bootstrapping: the operator creates the first user and API key from the admin
-UI, so no special bootstrap command is needed.
-
-## User area (`/me`)
-
-Where users manage their own things, starting with their agents: create, edit (system prompt,
-upstream model, default params, extensions and their settings), make default, delete. It is a
-separate LiveView area next to `/admin`, not a restricted admin console, and uses the same
-agent form (`MeridianWeb.AgentFormComponent`). Any model the upstream offers can be picked,
-as in the admin console. Users can't create other users or see anyone else's things; there is
-still no signup.
-
-- **Sign-in** is the OIDC provider only, on whenever user sign-in is (`OIDC_CLIENT_ID`); without
-  it, `/me` is 404. The flow is the admin one (code + PKCE, `state`, `nonce`, flow cookie), with
-  the redirect URI `/me/auth/callback`, and links the person to their user exactly like the other
-  sign-ins (by verified email on a first sign-in; no user, no entry).
-- **The session** is its own signed cookie, scoped to `/me` (14 days, `SameSite=Lax`), holding
-  the user id and linked identity, so deleting the user or unlinking ends it. It is separate
-  from the admin session and the `/api` sign-in cookie: `ADMIN_EMAILS` means nothing here, and a
-  `/me` session never opens `/admin`. `/me` has its own LiveView socket (`/me/live`) for the
-  same reason `/admin` does.
-- Agents are loaded through `Agents.get_agent!(user, id)`, so another user's id is a 404.
-- Browser apps find it as `account_url` in `GET /api/auth/session`.
-- The sidebar has the admin console's **Configure** group: agents (`/me`), skills (the global
-  ones, which you can read, and your own), MCPs (soon), and extensions (`/me/extensions`: the global ones, which you can read, and your own,
-  which you write there; and which of your agents use each).
-- *Later:* self-service API keys, browsing your own threads.
-
-### Access requests (`/me/request`)
-
-A public page where anyone can leave their email (and optionally a name) to ask to be added,
-so the operator can send friends a link instead of collecting emails by hand. It is styled
-like xebec's login (its own `public.css`) and is on whenever `/me` is. The admin login uses
-the same front-door look and mark (`MeridianWeb.BrandComponents`) in the console's green, so
-the two can't be mistaken for each other. The same split runs through the rest: the admin
-console is green (following the system's light or dark), and `/me`, its sign-in page
-included, is xebec's amber. Both sidebars carry the mark.
-
-- A valid email always gets the same "request sent" answer, whether it already has a user, a
-  request, or neither, so the page doesn't reveal who has access. Emails that have a user are
-  never saved.
-- **One request per email** (case-insensitive, a unique index). Asking again moves the existing
-  request to the top of its list (`requested_at`), counts it ("Asked 3 times"), and takes the
-  new name if one was given; it keeps its status. Lists are newest-asked first.
-- The admin console lists requests as cards (`/admin/requests`), email first, then the name.
-  **Accept** creates the user (name: theirs, or the start of their email) with a default
-  agent on the model set at the top of the page (suggested: the newest user's), and deletes
-  the request; they then sign in as usual. **Snooze** moves it to "Later", with no timer.
-  **Reject** keeps it (so the same email can't keep asking) under "Rejected", where it can be
-  restored.
-- At most 200 open (pending or snoozed) requests; past that the page says it isn't taking
-  requests. That bounds what a script filling in the form can do. There is no other rate
-  limiting yet.
-- This is still not signup: nobody gets in until the operator accepts.
-
-## Runs: the durable execution model
-
-A **run** is one agent turn: from a user message to a final assistant message, including any
-number of model calls and tool calls in between. Each model call + its tool calls is a **step**.
-
-### State machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> queued
-    queued --> running: worker picks up
-    running --> awaiting_approval: tool needs approval (later)
-    awaiting_approval --> running: approved / denied
-    running --> completed
-    running --> failed
-    queued --> cancelled
-    running --> cancelled
-    awaiting_approval --> cancelled
-    failed --> queued: retry (crash recovery)
-    completed --> [*]
-    cancelled --> [*]
-    failed --> [*]
-```
-
-`awaiting_approval` exists in the state machine from day one but is unused in v0.
-
-### Execution
-
-1. `POST /messages` (or Channel `send_message`) inserts the user message and a `runs` row
-   (`queued`) in one transaction and enqueues an Oban job. The response returns right away.
-2. The Oban worker starts a `RunServer` (GenServer) under a `DynamicSupervisor`, registered in a
-   `Registry` by `run_id`.
-3. `RunServer` executes the agent loop, calling into the [hook pipeline](#hook-points) at each
-   stage: build context → call model (streaming) → execute tool calls → append results → repeat
-   until the model produces a final answer, a hook stops it, or a step limit is hit.
-4. Every meaningful thing becomes an **event**: it is broadcast on PubSub (`run:<id>`,
-   `thread:<id>`) immediately, and persisted to `run_events`.
-5. On completion the final assistant message (and intermediate tool messages) are written to
-   `messages`, the run is marked `completed`, and the `run_end` hook fires (where extensions can
-   enqueue follow-up work such as memory reflection or title generation).
-
-**One active run per thread** is enforced by a partial unique index on
-`runs(thread_id) WHERE status IN ('queued','running','awaiting_approval')`.
-
-### Event stream and resume
-
-Events have a per-run monotonically increasing `seq`. To subscribe (SSE or Channel), a client
-provides its last seen `seq`:
-
-1. Subscribe to the PubSub topic first (buffering).
-2. Replay persisted events with `seq > last_seq` from Postgres.
-3. Flush the buffer, dropping anything already replayed (dedupe on `seq`), then tail live.
-
-Token deltas are **coalesced** (every ~100 ms) into a single `message.delta` event, which is
-persisted and broadcast like any other event, so live and replaying clients see the same events.
-
-Core event types:
-
-- `run.started`, `run.completed`, `run.failed`, `run.cancelled`
-- `step.started`, `step.restarted`
-- `message.delta` (text / reasoning content), `message.completed`
-- `tool_call.started`, `tool_call.completed` (see [Tools](#tools))
-- `ext.<extension>.<name>`: namespaced events emitted by extensions (e.g.
-  `ext.memory.recalled`)
-
-### Crash recovery
-
-OTP supervision handles in-process crashes, but a pod restart kills everything in memory, so
-durability comes from Postgres:
-
-- Completed steps (model output + tool results) are checkpointed when each step finishes.
-- If a worker dies mid-run, Oban retries the job. The new `RunServer` loads the checkpointed
-  steps, emits `step.restarted` (clients discard that step's partial text), and regenerates only
-  that step.
-- Tool calls that already completed are never re-executed.
-- A janitor job marks runs stuck in `running` with a stale heartbeat as failed / retryable.
-
-### Cancellation
-
-Explicit, via REST or Channel. The cancel is broadcast on PubSub (works across nodes), the
-`RunServer` aborts the upstream request, persists partial content, and emits `run.cancelled`.
-
-## Extensibility
-
-The goal is to be moddable in the way the [pi coding agent](https://github.com/badlogic/pi-mono)
-is, without knowing up front what the mods will be. The design rule that keeps us from painting
-ourselves into a corner:
-
-> **The core only knows about runs, threads, agents, and the hook pipeline.
-> Everything else, including our own features, is an extension built on the public extension
-> API.**
-
-If memory, skills, and title generation can be written as extensions, the API is good enough for
-things we haven't thought of. If one of them needs to reach into the core, the API is missing
-something and we fix the API, not add a special case.
-
-### What an extension is
-
-An extension is **middleware on the run lifecycle, plus a place to keep state and do background
-work, switched on per agent.** Concretely: a Lua script, stored in the database and edited in
-the browser, that the core calls at fixed hook points during a run. Adding a feature means
-writing a script and saving it, not editing the core, not deploying, and not working around it
-with MCP servers, skills, or prompt instructions. That matters for features like memory, which have to act without the
-model asking (inject what it knows into every request, learn after a run ends); a tool or skill
-only runs when the model decides to call it.
-
-Unlike plain middleware:
-
-- The hook points are fixed by the core. Each one is a contract the core keeps.
-- Some hooks pass data through to be changed, some only observe, a few can halt.
-- Extensions also live outside the chain: they run background jobs (and, later, keep state).
-
-Every hook the run lifecycle can fire exists from the start, used or not (see
-[Hook points](#hook-points)). Hooks that depend on core features that don't exist yet (the
-tool loop) arrive with those features.
-
-### What an extension can do
-
-Modeled on pi's extension API, minus the client/UI parts (Meridian is a server). What exists
-now, and what each capability will look like for scripts:
-
-| Capability                | Mechanism | Now? |
-|---------------------------|-----------|------|
-| Observe / modify the run lifecycle | Hook handlers (see below) | Yes |
-| Contribute to the prompt  | `before_run` / `context` hooks (system prompt sections, injected messages) | Yes |
-| Call the model, read and title threads | The `meridian` table (`meridian.model.complete`, `meridian.threads.*`) | Yes |
-| Background work           | `jobs` functions, queued with `meridian.jobs.enqueue` (unique keys, delays) | Yes |
-| Configuration             | Settings with defaults, declared by the script, set per agent, checked by the script's `validate` | Yes |
-| Provide model-callable tools | `tools` in the script: name → description, JSON Schema `parameters`, a `run` function (see [Tools](#tools)) | Yes |
-| Emit events to clients    | `ext.<name>.<type>` in the run event stream | Later |
-| Own data                  | Key-value storage through the `meridian` table (scripts can't run migrations) | Later |
-| Expose an API             | Routes under `/api/ext/<name>/`, dispatched to the script | Later |
-| Talk to other extensions  | Extension-scoped PubSub topics | Later |
+`model_stream_event` exists but isn't available to scripts (too hot).
 
 ### Tools
 
-A tool is a function the model can ask for. The model never runs anything: the request lists
-the tools (name, description, JSON Schema for the arguments), the model answers with
-`tool_calls` (a name and arguments as a JSON string) and `finish_reason: "tool_calls"`, Meridian
-runs the functions and adds their results to the conversation as `role: "tool"` messages, and
-calls the model again. That repeats until the model answers without asking for a tool. Whether
-a model can call tools at all depends on the upstream (its chat template and tool parser), not
-on Meridian.
+Tools live in the script under `tools` (description, JSON Schema `parameters`, `run`). Enabling
+an extension enables all its tools. The model sees them as `<extension>__<tool>`; the tool set
+is fixed for the run after `before_run`. Calls of one step run concurrently.
 
-**Tools are part of extensions.** Hooks are functions the core calls at fixed points; tools are
-functions the model asks for, which the core then calls. Both are "a Lua function in an
-extension that Meridian calls with a context", with the same sandbox, settings, `meridian`
-table, and errors. A script declares them under `tools`, next to its hooks and jobs, and they
-can share code:
-
-```lua
-M.tools = {
-  get_weather = {
-    description = "Current weather for a city",
-    parameters = { type = "object", properties = { city = { type = "string" } },
-                   required = { "city" } },
-    run = function(args, ctx)
-      return lookup(args.city, ctx.settings.units)   -- text, or a table (sent as JSON)
-    end,
-  },
-}
-```
-
-- **Declaring.** Tool names are letters, digits, `_` and `-`. `description` is required.
-  `parameters` is a JSON Schema object, as a table or as a JSON string (Lua can't tell an empty
-  object from an empty list: an empty table becomes an object, so leave out empty lists or use
-  a string); without it the tool takes no arguments. They are checked when the script is saved.
-- **Enablement.** Enabling an extension on an agent enables all its tools. There are no
-  per-tool (or per-hook) switches in the core: an extension that wants a part to be optional
-  makes it a setting, and `before_run` gets the run's tool set, so a script can drop its own
-  tools; access that should differ is a different extension.
-- **The run's tool set.** At the start of a run, the tools of the agent's enabled extensions
-  are collected under the name `<extension>__<tool>` (shortened to 64 characters if needed, unique per run), offered to `before_run`
-  (which may remove tools or change their descriptions), and frozen for the run: every model
-  call of the run offers the same tools.
-- **The loop.** One model call plus the tool calls it asks for is a step. The `RunServer`
-  collects the streamed tool call fragments, saves the assistant message (with its
-  `tool_calls`, after `message_end`), and runs each call: the `tool_call` hook (may rewrite the
-  arguments or block the call), then the tool's `run` in its own supervised task, so the
-  `RunServer` keeps handling cancels and heartbeats; calls of one step run concurrently. Each
-  result goes through `tool_result` and is saved as a `tool` message. Once every call has a
-  result, `step_end` fires and the next step starts, with `context` and `before_model_request`
-  called again on the conversation so far.
-- **Failures are results.** An unknown tool, arguments that aren't a JSON object, a blocked
-  call, a tool that raises, returns `nil, "message"`, or takes too long: the model gets
-  `Error: ...` as the result and decides what to do. Only the run's own problems (the upstream,
-  the step limit) fail the run. A crashing `tool_call` handler blocks the call (fail-closed).
-- **Limits.** A tool call gets 30 s (`:tool_timeout`) and the usual memory cap and instruction
-  budget; its result is cut at 20 000 characters (`:max_tool_result_chars`), saying so; a run
-  makes at most 10 model calls (`:max_steps`) and fails with `too_many_steps` past that.
-- **History.** Tool messages are kept in the thread like any other message, so later runs see
-  them. A tool call without a saved result (the run was cancelled or interrupted) is sent
-  upstream with `Error: the tool call was interrupted`, so the history is always valid.
-- **Approval.** Everything is approved automatically for now; `awaiting_approval` stays
-  unused.
-- **Events.** `tool_call.started` (`id`, `name`, `arguments`) and `tool_call.completed`
-  (`id`, `name`, `status` `ok`/`error`, and the saved `tool` message). Intermediate assistant
-  messages get `message.completed` like the final one, so a run can complete several messages.
-  The admin console shows the event types and times only, as for every event.
-
-`load_skill` (see [Skills](#skills)) is the one tool that isn't an extension's: the core runs
-it.
-
-Not in the first version: HTTP for scripts (`meridian.http`, which needs its own SSRF rules),
-so tools are pure Lua plus the `meridian` table; resuming a run after a crash (`run_steps`; a
-crash still fails the run); approval; client-side tools on `/api`; tools on `/v1` (it stays a
-proxy); MCP servers as a tool source ("soon").
-
-### Hook points
-
-Hooks are called from the process where the lifecycle event happens: the `RunServer` for
-everything inside a run. `run_end` fires once the run's final state is committed, from whichever
-process ended it (the `RunServer`, the janitor, a cancel of a queued run), and never inside the
-transaction. Each handler runs in its own supervised task with a timeout (5 s by default), in
-priority order (then installation order). Each returns
-`{:cont, value}` to pass a (possibly modified) value on, or `{:halt, reason}` where halting is
-allowed.
-
-Only extensions enabled on the run's agent are called (see
-[Enablement](#enablement-and-configuration)). Every handler receives the value for its hook and
-a context: the run, thread and user ids, the agent, and this extension's settings for that
-agent.
-
-| Hook               | Receives / may change | Can halt? | Available |
-|--------------------|-----------------------|-----------|-----------|
-| `run_start`        | Run, thread, agent. Observe; set up per-run state | No | v0 |
-| `before_run`       | System prompt sections, model params, and the tool set for this run | Yes (reject run) | v0 (tool set: slice 5) |
-| `context`          | The conversation history about to be sent, without the system prompt (inject, trim, summarize, rewrite). Called before every model call of the run | No | v0 |
-| `before_model_request` | The final upstream request body (model routing, params). Called before every model call | No | v0 |
-| `model_stream_event` | Raw stream events. Read-only, must be fast | No | v0 |
-| `tool_call`        | Tool name + arguments (rewrite) | Yes (block → error result to the model) | Slice 5 |
-| `tool_result`      | Tool result (redact, transform). Chained | No | Slice 5 |
-| `message_end`      | Finalized assistant message (replace content), every one the run saves | No | v0 |
-| `step_end`         | Step boundary. Observe (*later:* may request one more model call, `continue`) | No | Slice 5 |
-| `run_end`          | Final outcome. Observe; enqueue follow-up jobs (must return quickly) | No | v0 |
-| `thread_created` / `thread_deleted` | Thread lifecycle | No | v0 |
-
-`model_stream_event` is called for every streamed chunk, which is too often for sandboxed code,
-so it isn't available to scripts (a script that defines it isn't saved).
-
-Scripts reach the core only through the `meridian` table (`Meridian.Extensions.Capabilities`:
-read threads and messages, set a title, a non-streaming model call, queue a job, time, JSON,
-log), never the internal contexts; the sandbox makes that a guarantee, not a convention. That is
-what "built on the public extension API" means. Everything in it is scoped to the user of the
-call's context, global extension or not. Background jobs run on a shared `extensions` Oban
-queue (one worker, `Meridian.Extensions.Job`, that calls the script's job function) and must be
-idempotent.
-
-In Lua, a chained hook returns the (changed) value, or nothing to leave it as it was;
-`before_run` rejects the run with `return false, "reason"`. Values cross the boundary as plain
-data (tables become maps, or lists when their keys are 1..n).
-
-`before_run` gets the system prompt as a list of sections (the agent's first); they are joined
-with blank lines, and the result goes first in the request as for `/v1` (merged into a leading
-system message from `context`, if there is one).
-
-Failure semantics (borrowed from pi): each handler call runs in its own process with a timeout
-(5 s), a memory cap, and an instruction budget (2 million, about 2 s at the VM's ~1 million
-instructions a second). A crashing, hanging, or invalid-returning **observer or chained
-handler** is logged, kept as the extension's latest error (shown on its page), and skipped
-(fail-open): the next handler gets the value as it was. Each call starts from the script as it
-was loaded, so nothing a call changes carries over to the next. A crashing **`tool_call`** handler
-blocks the tool (fail-closed). An extension crash never takes down the run, and never the node.
-
-### How extensions are delivered
-
-The extension *API* above is the contract. *Delivery* is a separate layer, and we can add
-mechanisms over time without changing the contract:
-
-1. **Lua scripts in the database (now).** An extension is a row: a name, a Lua 5.3 script,
-   and an owner (none for global extensions). The script returns a table that *is* the
-   extension: `description`, `settings` (defaults), `validate`, a function per hook, `jobs`,
-   and `tools` (see `Meridian.Extensions.Script`). It runs on the `lua` package, a Lua VM written in Elixir,
-   so there's no native code, and it's sandboxed (no files, OS, or `require`). Scripts are
-   edited in the browser (`/admin/extensions`, `/me/extensions`), checked by loading them when
-   saved, and used from the next hook call on; no git, no deploy. They can be exported as
-   `<name>.lua` and imported (which only fills the editor). There are no extensions in the repo.
-   The catch: scripts can't bring dependencies; what they can't do in plain Lua, the `meridian`
-   table has to offer.
-2. **MCP servers (soon).** For *tools* specifically. Any MCP server, in any language, configured
-   as an extension. Covers the most common extension need with zero Elixir.
-3. **Remote extensions, or more script runtimes (later).** Hooks delivered over a protocol
-   (JSON-RPC over WebSocket or HTTP) to an out-of-process service, so extensions can be written
-   in Rust, TypeScript, etc. TypeScript on Deno (with its permission flags as the sandbox, and
-   npm packages as dependencies) would be the same idea as a second runtime for rows.
-   Pays network latency per hook, so subscriptions are explicit ("I only want `run_end`").
-4. **WASM (maybe, spicy).** Sandboxed extensions via Wasmex (wasmtime). Untrusted code with
-   capability limits, written in Rust/TS/etc. Only worth it if we ever want to run extensions we
-   don't trust.
-
-Trust model: scripts are *not* trusted. Anyone with a `/me` account can write one, so they run
-sandboxed and see only what the `meridian` table gives them, for the user they run for. Admins
-can read and edit every extension, users' own included: it's code running on the operator's
-server, and it can cost money (model calls). Users can read the code of global extensions. MCP
-servers (local) are fully trusted, the same as pi. Remote extensions see only what their hook
-subscriptions send.
-
-### Enablement and configuration
-
-- **Available** = global (made in `/admin`) or the agent's user's own (made in `/me`).
-  **Enabled** = switched on for a given agent. Nothing is on by default; since agents belong
-  to users, a user who doesn't want an extension simply doesn't enable it.
-- `agents.extensions` maps each enabled extension's **id** to its settings. Present means
-  enabled: `{"0192…": {"timezone": "Europe/Stockholm"}}`. Ids, not names, because a user's own
-  extension may share a name with a global one.
-- Each script declares the settings it accepts and their defaults. The agent form lists every
-  extension available to the agent's user with an on/off toggle and its settings, checked by
-  the script's `validate` on save.
-- Settings are frozen into the run with the rest of the agent (`runs.agent_snapshot`), so
-  changing an agent never affects a run in flight.
-- The scripts are not frozen: saving one changes it for runs in flight from their next hook.
-- An agent that lists an extension that's gone (or isn't available to its user) keeps the
-  entry, but it is ignored at run time and shown as gone in the agent form.
-- *Later:* API key policies further restricting or configuring extensions (e.g. read-only memory
-  for a coding agent's key), merged over agent settings. Deferred: it requires runs to record
-  which key started them.
+**Failures are results:** an unknown tool, bad arguments, a block, an error, or a timeout gives
+the model `Error: ...`. Limits: 30 s per call, results cut at 20,000 characters. Tool calls are
+approved automatically.
 
 ## Skills
 
-A skill is instructions for a kind of task: a **name**, a **description** (what it's for, and
-when to use it), and a **prompt** (the instructions). Like extensions, skills are global (made
-in `/admin/skills`) or a user's own (made in `/me/skills`), and agents enable them by id
-(`agents.skills`); ids of skills that are gone are kept but ignored. A user's own skill with
-the same name as a global one replaces it.
+A skill is a name, a description, and a prompt; global or a user's own (a user's own replaces a
+global one with the same name), enabled per agent by id. Core data, not an extension: writing
+one is filling in a form.
 
-**Progressive disclosure.** The model doesn't get every skill's instructions on every request.
-A run with skills adds a section to the system prompt (after the agent's) listing each
-enabled skill's name and description, and offers a `load_skill` tool (its `name` parameter is
-an enum of the enabled skills) that returns a skill's prompt. The model loads a skill when a
-task matches its description, so a skill costs only its description until it's needed. The
-section and the tool go through `before_run` like everything else, so an extension can see or
-drop them; calls go through `tool_call` and `tool_result`. The run uses the skills as they
-were when it started.
+Delivered by **progressive disclosure**: the system prompt lists enabled skills' names and
+descriptions, and the core `load_skill` tool returns a prompt when the model asks. Both go
+through hooks like everything else. A skill can recommend extensions; missing ones are only a
+warning in the agent form.
 
-**Recommended extensions.** A skill can list extensions it works best with (a database skill
-might want an HTTP extension). It's a hint, not a dependency: an agent that enables the skill
-without one of them gets a warning in the agent form, and nothing else happens. A global
-skill can only recommend global extensions.
+## Identity and access
 
-## Identity: users, API keys, policies
+Users are created by the operator only (by hand or by accepting an access request); there is
+no signup. Credentials are never shared between roles:
 
-- **Users** are generic: id, display name, email (required, unique case-insensitively, since
-  it is how a first sign-in finds its user). There is no signup. Users are
-  created by the operator in the [admin UI](#admin-ui), by hand or by accepting an
-  [access request](#access-requests-merequest).
-- **API keys** identify a user to clients, one per client/purpose. Minted in the admin UI (and
-  later self-service via `/api/keys`). Format `mrd_<random>`, shown once, stored as a SHA-256
-  hash with a short visible prefix.
-- **OIDC access tokens** (optional, `OIDC_AUDIENCES`) identify a user to first-party clients
-  that let people sign in. Meridian is only a *resource server*: the client runs the login with
-  the provider and sends the access token as `Authorization: Bearer`, exactly where an API key
-  would go. Meridian verifies it (RS256 against the provider's JWKS; issuer; audience is one of
-  `OIDC_AUDIENCES`; expiry) and looks up the user by `(oidc_issuer, oidc_subject)`. A subject
-  seen for the first time is linked to the user whose email matches the provider's userinfo
-  (unless marked unverified); a user already linked to another identity is never relinked, and
-  without a matching user the request is refused. The operator can unlink in the admin UI.
-  Signed-in users get the default policy (all their agents). Run events tokens are tied to
-  the user instead of a key. Access tokens aren't checked for revocation; they are short-lived.
-- **Sign-in sessions** (on whenever `OIDC_CLIENT_ID` is set) are for browser apps without a backend,
-  such as xebec. They can't run the login themselves: the code-for-token exchange is a browser
-  request to the provider's token endpoint, which needs CORS from the provider, and WorkOS
-  doesn't allow it for OAuth applications. So Meridian runs it under `/api/auth` (login,
-  callback, session, logout), exactly like admin sign-in, links the user the same way, and keeps
-  a signed cookie (`SameSite=Lax`, path `/api`, 14 days) with the user id and linked identity;
-  deleting the user or unlinking ends it. `/api` accepts the cookie when there is no bearer
-  token. The app must be on Meridian's origin (its reverse proxy forwards `/api`); CORS still
-  never allows credentials. Requests that change something need `X-Requested-With`, so a sibling
-  subdomain (same site, so the cookie goes along) can't forge them with a plain form.
-- **Client contract.** Whatever the credential, a client sends one bearer token and gets a
-  user. Browser apps on Meridian's origin may send the sign-in cookie instead. Meridian knows nothing about specific clients or how they got their token, so any
-  number of clients can share it. Generic OpenAI clients use API keys; apps with a sign-in
-  button use the provider.
-- Credentials are never mixed between roles: **API keys** and **OIDC access tokens**
-  (users → APIs), **`/me` sign-in** (users → their own `/me`), and **admin sign-in** or the
-  **admin token** (operator → `/admin`). Signing in to a client or to `/me` never grants admin
-  access.
-- Each key carries a **policy**:
+| Credential | Who → what |
+|---|---|
+| API key (`mrd_…`, SHA-256 hashed, with a policy: `default_agent`, `allowed_agents`) | User → `/v1`, `/api` |
+| OIDC access token (`OIDC_AUDIENCES`) | User → `/v1`, `/api`, for clients that run their own login |
+| `/api/auth` cookie session | User → `/api`, for same-origin browser apps (Meridian runs the login, because providers don't allow CORS on token exchange). Mutations need `X-Requested-With` |
+| `/me` session | User → their own `/me` |
+| Admin sign-in (`ADMIN_EMAILS` allowlist) or `ADMIN_TOKEN` | Operator → `/admin` |
 
-```jsonc
-{
-  "default_agent": "coder",            // used if the client sends an unknown/generic model
-  "allowed_agents": ["coder", "default"],
-  "extensions": {                         // per-extension overrides (native surface, later)
-    "memory": { "scopes": ["coding"], "write": "explicit" }
-  }
-}
-```
+All sign-ins use one OIDC client (code + PKCE, `state`, `nonce`; hand-rolled with Req and
+`:crypto`, RS256 only). A first sign-in links to the user by verified email; a linked user is
+never relinked.
 
-## Agents
+## Web areas
 
-An agent is a named bundle presented to clients as a model:
+All LiveView, hand-written CSS, no asset build.
 
-- `slug` (→ model id `meridian/<slug>`), display name
-- system prompt
-- upstream model + default params (temperature, max tokens, ...)
-- enabled extensions + their per-agent config
+- **`/admin`**: the operator console (green). **Operate**: users, access requests, runs (live
+  event types and timings, never payloads). **Configure**: everyone's agents, skills,
+  extensions.
+- **`/me`**: the user's own area (amber), with the same Configure group, scoped to their
+  things. 404 unless OIDC is configured.
+- **`/me/request`**: public access requests. The answer is the same whatever the email (it
+  doesn't reveal who has access), there's one request per email (asking again bumps it), and
+  open requests are capped at 200. The operator accepts (creates the user with a default
+  agent), snoozes, or rejects (kept, so the email can't ask again).
 
-On create/update, the upstream model is **validated against the provider's `/v1/models`**
-(cached briefly). Passing `force: true` skips validation, for upstreams that don't list all
-models or that are temporarily down.
+## Data model
 
-Agents belong to a user. A default agent is created along with each new user.
-
-## Memory
-
-Memory is deliberately **not part of the core**. It's an open design space (vector store,
-knowledge graph, an external service like Honcho, reflective vs. explicit writing), and we don't
-want to commit to one answer yet.
-
-The hook pipeline is designed so that any of these is possible as an extension:
-
-- **Read**: `context` / `before_run` to retrieve and inject; `emit` to show clients what was
-  recalled.
-- **Write explicitly**: register `remember` / `recall` / `forget` tools.
-- **Write reflectively**: `run_end` → enqueue an Oban job that extracts memories.
-- **External service** (e.g. Honcho): same hooks, but the extension calls out to the service
-  instead of owning tables.
-- **Inspect / edit**: mount routes under `/api/ext/memory/`.
-
-`pgvector` should be available in the database so a local memory extension can use it, but the
-core schema doesn't depend on it.
-
-Writing a first memory extension is the real test of the extension API.
-
-## Data model (core, first pass)
-
-All ids are UUIDv7 (time-ordered). Timestamps are `utc_datetime_usec`.
+UUIDv7 ids (monotonic), `utc_datetime_usec` timestamps.
 
 ```text
-users           id, name, email, oidc_issuer?, oidc_subject?, inserted_at
-api_keys        id, user_id, name, prefix, token_hash, policy jsonb, last_used_at, revoked_at
-agents        id, user_id, slug, name, system_prompt, model, params jsonb,
-                extensions jsonb, skills uuid[], is_default
-threads         id, user_id, agent_id, title, settings jsonb, archived_at, inserted_at, updated_at
-messages        id, thread_id, run_id?, parent_id?, role (user, assistant, tool), content jsonb (parts),
-                tool_calls jsonb?, tool_call_id?, metadata jsonb, usage jsonb?, inserted_at
-runs            id, thread_id, user_message_id, parent_run_id?, status, agent_snapshot jsonb,
-                model, step_count, usage jsonb, error jsonb?, heartbeat_at,
-                started_at, finished_at
-run_steps       id, run_id, index, status, request jsonb, response jsonb, tool_results jsonb
-run_events      run_id, seq, type, payload jsonb, inserted_at        -- PK (run_id, seq)
-extensions      id, name, source, user_id?                         -- user_id null = global
-extension_state extension_id, scope_type, scope_id, key, value jsonb -- KV for scripts (later)
-skills          id, name, description, prompt, recommended_extensions uuid[], user_id?
+users            id, name, email, oidc_issuer?, oidc_subject?
+api_keys         id, user_id, name, prefix, token_hash, policy, last_used_at, revoked_at
+agents           id, user_id, slug, name, system_prompt, model, params, extensions, skills, is_default
+threads          id, user_id, agent_id, title
+messages         id, thread_id, run_id?, role, content (parts), tool_calls?, tool_call_id?, metadata, usage?
+runs             id, thread_id, user_message_id, status, agent_snapshot, usage, error?, heartbeat_at, ...
+run_events       run_id, seq, type, payload               -- PK (run_id, seq)
+extensions       id, name, source, user_id?               -- no user = global
+skills           id, name, description, prompt, recommended_extensions, user_id?
+access_requests  id, email, name?, status, times_requested, requested_at
 ```
 
-Notes:
-
-- Slice 2 created `threads`, `messages`, `runs`, and `run_events` with only the columns in use
-  (see the decision log); the rest are added when a feature needs them.
-- `messages.parent_id` allows edit-and-regenerate / branching later without a schema change.
-- `messages.metadata` gives extensions a place to annotate messages without schema changes.
-- `runs.agent_snapshot` freezes the agent config (including extension config) used.
-- `run_events` can be pruned after a retention period, since final messages live in `messages`.
+Columns are added when a feature needs them, not ahead of time.
 
 ## Configuration
 
-Everything environment-specific comes from env vars. Nothing about any particular deployment
-is in the repo.
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL`, `POOL_SIZE` | Postgres |
+| `SECRET_KEY_BASE`, `PHX_HOST`, `PORT`, `PHX_SERVER` | Phoenix |
+| `LLM_BASE_URL`, `LLM_API_KEY` | Upstream |
+| `EXPOSE_UPSTREAM_MODELS` | Also list raw upstream models on `/v1/models` |
+| `CORS_ALLOWED_ORIGINS` | Browser origins for `/v1` and `/api` |
+| `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | Sign-in (turns on `/me` and `/api/auth`) |
+| `OIDC_AUDIENCES` | Client ids whose access tokens the APIs accept |
+| `ADMIN_EMAILS`, `ADMIN_TOKEN` | Admin access (neither = `/admin` off) |
+| `DNS_CLUSTER_QUERY` | Clustering |
 
-| Variable               | Purpose |
-|------------------------|---------|
-| `DATABASE_URL`         | Postgres connection |
-| `SECRET_KEY_BASE`      | Phoenix secret |
-| `PHX_HOST`, `PORT`     | Public host / listen port |
-| `LLM_BASE_URL`         | OpenAI-compatible upstream, e.g. `https://example.com/v1` |
-| `LLM_API_KEY`          | Upstream key (optional) |
-| `EXPOSE_UPSTREAM_MODELS` | Also list raw upstream models in `/v1/models` (default `false`) |
-| `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call `/v1` and `/api` (comma-separated, or `*`). Unset = none |
-| `ADMIN_TOKEN`          | Enables `/admin`; the secret used to log in. Unset (and no admin sign-in) = admin disabled |
-| `OIDC_ISSUER`          | OIDC provider for sign-in (admin and clients), exactly as its tokens' `iss` |
-| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | Meridian's client at the provider, for admin and user sign-in (the secret only for confidential clients). Also turns on `/me` |
-| `ADMIN_EMAILS`         | Emails allowed into `/admin` via sign-in (comma-separated); unset = admin sign-in off |
-| `OIDC_AUDIENCES`       | Client ids whose access tokens `/v1` and `/api` accept. Unset = API keys only |
-
-Extensions declare their own settings in their scripts; agents set them.
+Development also reads `.env` (shell variables win).
 
 ## Deployment
 
-- Multi-stage Dockerfile building a `mix release`; CI builds a multi-arch image
-  (`linux/amd64`, `linux/arm64`) with `docker buildx`.
-- Migrations run via a release command / init container.
-- Requires Postgres (with `pgvector` installed if extensions use it).
-- Kustomize bases in `deploy/` (`app/`, and an optional `postgres/`); see `deploy/README.md`.
-  Hosts, secrets, and the image tag belong in an overlay in the operator's own infrastructure
-  repo.
-- The image is public on GHCR, so clusters pull it without credentials.
-- Single node first; PubSub and `Registry` are designed so clustering (`libcluster`) is possible
-  later without redesign.
-
-## Testing approach
-
-- A fake OpenAI-compatible upstream (Bypass / a small Plug) that scripts streamed responses,
-  tool calls, delays, and failures, so the run lifecycle can be tested deterministically.
-- Crash-recovery tests: kill a `RunServer` mid-step, assert it resumes correctly.
-- Resume tests (SSE and Channels): disconnect, reconnect with `last_seq`, assert no gaps or
-  duplicates.
-- Extension tests run real Lua scripts through real runs against the fake upstream, and watch
-  hook calls through the `[:meridian, :extensions, :hook]` telemetry event. *Later:* a "try this
-  hook" button in the editor, so script authors can test without a real run.
-
-## Milestones
-
-Each slice should end with something usable, not just a layer.
-
-**Slice 0: skeleton** ✅
-
-- Phoenix (API), Ecto, Oban, Req, health probes, Dockerfile, CI + multi-arch image, compose
-  for local Postgres.
-
-**Slice 1: usable agent proxy.** ✅ *Done when: pi (or any OpenAI client) talks to an upstream
-model through Meridian, using an agent.*
-
-1. Admin UI skeleton: LiveView plumbing, `ADMIN_TOKEN` login.
-2. Users + API keys (schemas, admin pages, API-key auth plug).
-3. Upstream client (`/v1/models`, streaming chat completions via Req).
-4. Agents (schema, admin pages, upstream model validation with `force`).
-5. `/v1/models` + `/v1/chat/completions` agent proxy (streaming).
-
-**Slice 2: durable conversations.** ✅ *Done when: a first-party client can send a message, quit,
-reconnect, and see the full reply.*
-
-1. Threads, messages, runs, `RunServer`, event log.
-2. REST + resumable SSE, cancellation.
-3. Live run view in the admin UI.
-
-Deferred from slice 2 (see the decision log): crash recovery by resuming runs (`run_steps`,
-`step.restarted`), `if_busy: queue | interrupt`, the thread-level SSE stream.
-
-**Slice 3: extension API v0.** ✅ *Done when: two built-in extensions, enabled per agent, work
-using only the public extension API.*
-
-1. `Meridian.Extension` behaviour, the hook pipeline (every v0 hook in
-   [Hook points](#hook-points), with timeouts and fail-open/closed semantics), and the
-   `Meridian.Extension.API` facade.
-2. Per-agent enablement and settings, including the admin agent form.
-3. `datetime` extension: adds the current date and time to the system prompt (`before_run`
-   hook), with a per-agent timezone setting.
-4. `title` extension: after a thread's first completed run, a background job asks the model for
-   a title and sets it only if the thread still has none (`run_end` hook, Oban job, model call
-   from an extension). Clients see it the next time they fetch the thread.
-
-The built-in `datetime` and `title` extensions were later removed, with the Elixir behaviour:
-extensions became Lua scripts in the database (see the decision log). Both are easy to write
-as scripts.
-
-**Slice 3b: live extensions.** ✅ *Done when: an extension can be written, changed, and used
-without a deploy, by the operator or by a user for themselves.*
-
-1. Extensions as Lua rows (global or a user's own), sandboxed, with the `meridian` table, jobs,
-   and limits.
-2. The script editor in `/admin/extensions` and `/me/extensions`: save checks the script, the
-   latest error is shown, import and export as `.lua`.
-3. Agents enable extensions by id.
-
-**Slice 4: memory extension.** Design TBD (including whether agents share memories). Adds
-extension-owned tables; the real stress test of the extension API.
-
-**Slice 5: tools v0.** ✅ *Done when: a tool written in an extension's script is offered to the
-model, called, and its result used, over as many steps as the model needs, in a durable run.*
-
-1. `tools` in scripts, checked on save and shown on the extension pages.
-2. The run's tool set (`before_run`), the tool loop in the `RunServer`, and the `tool_call`,
-   `tool_result`, and `step_end` hooks.
-3. Tool calls and tool messages saved in the thread and sent back upstream.
-
-**Slice 6: skills.** ✅ *Done when: a skill written in `/me` or `/admin` is offered to the
-model by the agents that enable it, and loaded when a task calls for it.*
-
-**Next**
-- `meridian.http` for scripts (with SSRF rules), so tools can call APIs
-- Resuming runs after a crash (`run_steps`)
-- Tool approval (`awaiting_approval`), client-side tools on `/api`
-- MCP-backed tools
-
-**Later**
-
-- Phoenix Channels transport (WebSocket), and the thread-level SSE stream
-- Script versions and history, extension key-value storage, a "try this hook" button
-- Remote extensions or a TypeScript (Deno) runtime, maybe WASM
-- Responses API surface
-- Scheduled runs
+A multi-arch image (built on native runners) on GHCR. Kustomize bases in `deploy/` (see
+`deploy/README.md`); hosts and secrets go in the operator's own overlay. Health probes are
+exempt from `force_ssl`. Single node for now; PubSub-based cancel and per-node registries keep
+clustering open.
 
 ## Decision log
 
-Decisions we've made and why, including what we rejected, so they aren't reopened by accident.
-Add an entry whenever a decision is made or reversed.
+Current decisions only. Superseded ones are removed; git history has them.
 
-| Decision | Rejected alternatives | Why |
+| Decision | Instead of | Why |
 |---|---|---|
-| **Elixir/OTP** | TypeScript, Rust, Python | The core problem (long-lived, crash-tolerant sessions that outlive connections and fan out to subscribers) is what OTP is built for. TS has no particular fit; Rust adds a lot of async ceremony for I/O-bound work where the heavy compute lives in the inference server. Python was ruled out by preference. |
-| **Postgres + Oban for jobs, PubSub for fan-out** | Redis/NATS, Temporal/Restate | One stateful dependency to operate. Oban gives a durable queue (`SKIP LOCKED`), retries, and cron on Postgres. Temporal-style durable execution is overkill for a single-operator deployment; the `RunServer` boundary keeps the option open. |
-| **Two surfaces: stateless `/v1` + stateful `/api`** | Stateful only; OpenAI-compat only | Generic clients (chat UIs, coding agents) only speak stateless Chat Completions; durable threads need server-owned state. Same agents, different lifecycle owner. |
-| **Stateless `/v1` is a pure agent proxy** | Server tools/memory on `/v1` | Mixing server and client tool calls in one stateless response is messy (every tool call needs a result the client doesn't have; server tool exchanges vanish from the client's history). Keep it dead simple; revisit later (open question 1). |
-| **Agents exposed as model ids** | Custom headers, per-key agent only | Works in every OpenAI client without changes: pick `meridian/<agent>` as the model. |
-| **Memory is an extension, not core** | Building pgvector memory into core | The memory design (vector store, graph, Honcho, reflective vs. explicit) is undecided. Making it an extension defers the choice and tests the extension API. |
-| ~~**Core features are extensions; hooks added on demand**~~ *Reversed in slice 3, see below* | Designing the full hook API up front | Keeps the extension API real (proven by our own features) without building speculative hooks. |
-| ~~**One callback per hook**~~ *Moot since extensions are Lua scripts: a script defines a function per hook* | A single `handle_hook/3` | Discoverability and Dialyzer. Remote extensions get a generic form at the protocol boundary. |
-| **SSE + Phoenix Channels over one event log** | SSE only; WebSocket only | SSE for simple clients/curl, Channels for rich bidirectional clients. Neither has special semantics. |
-| **Admin UI is LiveView in the same release** | Separate SPA (e.g. TS) | One deployable, no extra API client or CORS. The live run view subscribes to the same PubSub topics as clients. No Node toolchain: the LiveView JS can be served from the dependency. |
-| **The admin console never shows conversations**: usage and run metadata only (counts, tokens, status, timings, event types); no thread view, titles, agents of threads, messages, replies, event payloads, or upstream error messages (they can quote the request) | Showing everything to the operator (the slice 2 thread and live run views); an opt-in per user | Running Meridian for friends shouldn't mean reading their chats. What the operator needs (is it working, what does it cost, who uses it) doesn't need the contents. Replaces the reply and payloads in the live run view; looking at what a run said is for the user, in their own client. |
-| **Admin auth via deployment secret `ADMIN_TOKEN`** | Admin scope on user API keys, user passwords | Operating the instance and using it are different roles with different credentials. Also removes the need for a bootstrap command. |
-| **OIDC sign-in for admin, with an `ADMIN_EMAILS` allowlist; `ADMIN_TOKEN` stays as an optional fallback** | WorkOS-specific integration (its User Management API or SDK); a proxy in front (oauth2-proxy, Cloudflare Access); token only | No long secret to keep and paste. Generic OIDC works with WorkOS AuthKit and any other provider, so deployments pick their own. The allowlist is needed because a provider only says who someone is, not that they operate this instance. Hand-rolled with Req and `:crypto` (RS256 only) instead of a JOSE dependency. |
-| ~~**Clients may authenticate with OIDC access tokens; Meridian is a resource server, not an authorization server**~~ *Amended, see "Meridian runs the login for browser apps" below* | Meridian running the login and minting its own tokens or API keys per client; cookie sessions for `/api` | Keeps one client contract (a bearer token) and keeps Meridian ignorant of clients. Clients use the provider's SDKs; Meridian only verifies. No cookies keeps the CORS reasoning intact. API keys stay for generic clients. |
-| **Sign-ins link to existing users by verified email; no signup** | Auto-creating users on first sign-in; the operator entering provider subject ids | Users stay operator-created. Email is what the operator already knows; the subject is stored on first sign-in so later changes to the email don't move the account. Never relinking a linked user stops a new identity with the same email from taking over. |
-| **Meridian runs the login for browser apps, with a cookie session on `/api`** (amends "Meridian is a resource server") | The app proxying the provider's token endpoint to get around CORS; a separate backend per app; the provider's browser SDK (a different WorkOS product, with its own tokens) | A static app can't trade the code for tokens: WorkOS's token endpoint doesn't send CORS headers for OAuth applications. Meridian already runs this flow for `/admin` and owns users and identities, so it owns the whole sign-in and apps stay ignorant of the provider. The cookie is same-origin only, so the CORS reasoning holds. Access tokens (`OIDC_AUDIENCES`) stay for clients that log in themselves. |
-| **One OIDC client for admin and user sign-in** (`OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET`; amends the two entries above) | Separate admin and user clients (`ADMIN_OIDC_CLIENT_*`, `USER_OIDC_CLIENT_*`) | Both flows are Meridian signing someone in, so they are one app at the provider with two redirect URIs; two clients only meant two of each setting. What separates the roles is `ADMIN_EMAILS`, not the client: a user sign-in never creates an admin session, and admin sign-in is off without the allowlist. The old variable names fail at boot with a pointer to the new ones. |
-| **Generic and environment-agnostic** | Assuming a specific inference server or cluster | Public project. Everything deployment-specific comes from env vars; deployment values live in the operator's own infrastructure repo. |
-| **Agent resolution on `/v1`**: `meridian/<slug>` → that agent (404 if unknown or not allowed); a raw upstream id → passthrough when `EXPOSE_UPSTREAM_MODELS`; anything else → the key's `default_agent`, else the user's default agent | Rejecting unknown models; falling back for unknown `meridian/` slugs too | Clients with a hardcoded model name (`gpt-4o`) still work, but a typo in an explicit agent id fails loudly instead of silently using the wrong agent. |
-| **Agent system prompt goes first, merged into the client's leading system/developer message** | A separate extra system message; appending after the client's | Some chat templates reject more than one system message or one that isn't first. The agent's identity comes before the client's (e.g. a coding agent's) instructions. |
-| **Agent params are defaults; client values win** | Agent params override the client | Clients tune per-request (e.g. temperature for tool calls); agents set sensible defaults. `model` and `messages` can't be agent params. |
-| **`/v1` relays the upstream response byte-for-byte** (status, content type, body; one path for streaming and non-streaming) | Parsing SSE and re-encoding; rewriting `model` in responses | Dead simple and transparent. Upstream errors reach the client unchanged. A client disconnect fails the next write, which cancels the upstream request. |
-| **Upstream model list cached for 60 s** (validation and `/v1/models`) | No cache; long cache | Partly answers open question 6. Short enough that new upstream models show up quickly. |
-| **The default agent's model is chosen when creating a user** | A `DEFAULT_MODEL` env var; agents with no model | Every user needs a working default agent immediately, and there's no deployment-wide "right" model. |
-| **Admin UI has no asset build**: hand-written CSS, Phoenix/LiveView JS served from the deps | Tailwind/esbuild | No Node or asset toolchain for a small operator console. Lets the CSP forbid inline scripts. |
-| **Multi-arch images built on native runners** | QEMU emulation | Deployments may mix amd64 and arm64 nodes. Native arm64 GitHub runners are much faster than emulation. |
-
-| **Deltas are coalesced before broadcast, not just before persistence** (one `message.delta` per ~100 ms, configurable) | Broadcasting every token live and persisting coalesced deltas | One event stream with one `seq` sequence: live and replaying clients get identical events, and resume/dedupe stays trivial. 100 ms is still smooth to read. |
-| **Runs aren't retried or resumed yet** (slice 2): a crashing `RunServer` or a shut-down node fails the run (`interrupted`); a janitor fails runs whose heartbeat is older than 60 s | Oban retries + checkpointed steps now | Runs are a single model call until tools exist, so there's no completed step to resume from. Failing fast frees the thread (one active run per thread) instead of leaving it stuck. Resume comes with `run_steps`. |
-| **Leaner first data model**: no `run_steps`, `parent_id`, `tool_calls`, `settings`, `archived_at`, `parent_run_id`, `step_count` yet | Creating every column from the design up front | Nullable columns are cheap to add when a feature needs them; unused ones invite half-semantics. |
-| **Cancelled replies are kept**: the partial text is saved as the assistant message (`metadata.finish_reason: "cancelled"`) and is part of later context | Discarding partial output | Matches what chat UIs do, and the user saw that text. |
-| **Reasoning is stored as a `reasoning` content part and never sent back upstream** | Dropping it; storing it in metadata | Clients and the admin UI can show it; chat templates generally expect reasoning to be stripped from history. |
-| **`POST /messages` only supports `if_busy: reject` (409) for now; deleting a thread with an active run is also a 409** | Queue/interrupt now; cancel-then-delete | Clients can cancel and retry explicitly. Keeps the one-active-run invariant simple until a client needs more. |
-| **The native API uses the same error shape as `/v1`** (`{"error": {"message", "type", "code"}}`) | A separate error format | One shape for clients to handle; the API key plug is shared. |
-| **Browser apps are first-class clients: CORS via `CORS_ALLOWED_ORIGINS`, never with credentials, never on `/admin`** | No CORS (same-origin or native clients only); a CORS dependency | APIs authenticate only with bearer keys, never cookies, so allowing an origin (even `*`) doesn't let a page act for anyone whose key it doesn't have. Requested headers are allowed as asked (SDKs send their own `x-` headers). A small plug, no new dependency. |
-| **`EventSource` authenticates with a run-scoped `events_token` in the query string** | API key in the query string; requiring `fetch`-based SSE | Keys in URLs end up in proxy logs and history. A signed token that only reads one run's events, expires in an hour, and dies with its key limits that exposure. `fetch` with the header also works. `token` is filtered from Phoenix logs. |
-| **A finished run's stream answers a reconnect with `204`** | Holding the connection open; `200` with an empty body | `EventSource` reconnects whenever a stream ends; `204` is the spec's signal to stop. |
-| **The `RunServer` never blocks on the upstream**: the request runs in a linked helper process (`Meridian.Upstream.Stream`) that forwards the response as messages | Calling `Req` (`into: :self`) from the `RunServer` | `Req` blocks its caller until response headers arrive, which can take minutes. A blocked `RunServer` can't handle cancels or send heartbeats, so the janitor would fail a live run. The same rule applies to any future work that waits on external services (tools, extension calls). |
-| **A run only completes if the upstream reported a `finish_reason`**; a stream that ends without one, or contains an event that isn't valid JSON, fails the run (`upstream_incomplete` / `upstream_error`) and saves no reply. `[DONE]` is not required if a finish reason arrived | Treating the end of the HTTP body as success; skipping malformed events | A dropped connection must not be saved as a complete answer, especially once `run_end` hooks act on completed runs. Partial text is only kept for cancels, where the user chose to stop. |
-| **UUIDv7 ids are generated with monotonic precision** | Millisecond precision | Messages are ordered by id; ids created within the same millisecond must still sort in creation order. |
-| **Every hook the run lifecycle can fire exists from v0, used or not** (replaces "hooks added on demand"). Tool hooks and `step_end` come with the tool loop | Adding each hook only when an extension needs it | Extensions should be able to hook anything in the lifecycle without a core change first; that is the point of the API. Unused hooks are covered by tests instead of a consumer. Core features remain extensions. |
-| **Extensions are enabled per agent, off by default**; `agents.extensions` maps name → settings (*amended: id → settings, see below*) (present = enabled), frozen into the run's agent snapshot | Global enablement; on-by-default extensions | Users and agents differ (memory on one agent only, or not at all). Since agents belong to users, this also gives per-user control. |
-| **API key policy overrides for extensions are deferred** | Building deploy → agent → key merging now | Runs don't record which key started them, so background work couldn't apply the key layer. Per-agent settings cover the need for now. |
-| **Extensions call the core only through `Meridian.Extension.API`** (*now the `meridian` table, see below*) | Extensions calling internal contexts (`Threads`, `Upstream`) | Gives "built only on the public extension API" a real meaning and keeps the core free to change internally. |
-| **`run_end` fires after the run's final state is committed, from whichever process ended it** | Only from the `RunServer` | Runs also end in the janitor, the worker (crash), and when a queued run is cancelled. Every end fires the hook exactly once, and handlers never run inside the transaction. |
-| **Hook handlers run in a supervised task with a timeout, not in the caller** | `try/rescue` in the calling process | A handler that hangs can't stall the `RunServer` (it must keep handling cancels and heartbeats), and a crash can't take the caller down. Spawning a process is cheap on the BEAM; handlers that aren't implemented cost nothing. |
-| **Extension settings are edited as JSON per extension** in the admin agent form | A typed settings schema rendered as fields | One generic form for every extension, like agent params. Extensions validate their own settings (`validate_settings/1`, now the script's `validate`). A schema can come later if the JSON gets in the way. |
-| **Thread hooks use the agent's current settings** | Freezing them | There is no run to freeze them in. |
-| **Generated titles don't bump `updated_at` and aren't pushed to clients** | A `thread.updated` event | A title isn't activity, so the thread shouldn't move up the list. Clients see it on their next fetch; a push can come with a thread-level event stream. |
-| **Development reads `.env` itself** (in `config/runtime.exs`; shell variables win); releases and tests only use real environment variables | `source`/`set -a` by hand; direnv; a dotenv library | Running locally shouldn't need shell tricks. A dozen lines cover `KEY=value` files without a dependency, and deployments keep config in the platform's environment, not in files. |
-| **Timezones via the `tz` package** | UTC offsets only | Elixir only ships UTC. Named zones with daylight saving need a timezone database; `tz` is small and has no runtime dependencies. |
-| **Slice 3 is proven by two tiny extensions (`datetime`, `title`)** (*both later removed with the move to Lua scripts*)**;** memory gets its own slice; Channels are dropped for now** | Title generation alone; memory in slice 3; Channels in slice 3 | Titles alone only exercise `run_end`. Memory's design (e.g. shared across agents or not) is a memory question, not an API one. No client needs WebSockets yet. |
-| **Kubernetes manifests are kustomize bases** (`deploy/app`, `deploy/postgres`) that overlays reference by URL; configuration comes from generated ConfigMaps/Secrets | A Helm chart; manifests only in the operator's repo; building images on a cluster node | Plain YAML with no templating to learn, and overlays keep every deployment-specific value out of this public repo. Generated names roll the Deployment when config changes. CI already builds multi-arch images in about two minutes, so nodes only ever pull. |
-| **Health probes are exempt from `force_ssl`** | Probing over HTTPS; a separate probe port | kubelet calls the pod over plain HTTP and counts a redirect to another host as success, so `/readyz` would pass with the database down. |
-| **Users manage their own agents in `/me`, a LiveView area separate from `/admin`** | User roles inside `/admin`; only a JSON API for clients (e.g. xebec) to build on | Keeps operating and using Meridian as different roles with different sessions: a bug in `/me` can't open `/admin`. Lives in the release (no client needed, no asset build) and reuses the admin agent form and the sign-in Meridian already runs. A JSON API for agents can come later on the same user-scoped domain functions. |
-| **`/me` signs in with the OIDC provider only, into its own `SameSite=Lax` cookie** | Reusing the `/api` sign-in cookie; `SameSite=Strict` with a meta-refresh callback like `/admin` | The `/api` cookie is scoped to `/api` and checked differently (`X-Requested-With`); LiveView needs a real session. Lax keeps people signed in when they follow a link to `/me` from an app; forms and the LiveView socket carry CSRF tokens, and the callback can simply redirect. |
-| **Users may pick any upstream model in `/me`** | An operator-defined allowlist of models | Nobody needs a limit yet; it can be added when someone does. |
-| **A public access request page; the operator accepts, snoozes, or rejects in the admin console** (keeps "no signup") | Signup; the operator collecting emails by hand; invite links | Lets friends ask without the operator typing their details, while users are still only ever created by the operator. Accepting reuses user creation, so the request holds nothing but an email and a name. |
-| **Request answers don't depend on the email; rejected requests are kept; open requests are capped at 200** | Telling people they already have access; deleting rejected requests; rate limiting by IP | The page is public, so it mustn't reveal who uses Meridian. Keeping rejections stops the same email from asking again. A cap is a dependency-free bound on abuse; IP rate limiting can come if it's needed. |
-| **Asking again bumps the existing request; it keeps its status** | Ignoring repeats; a row per request; un-snoozing or un-rejecting on a repeat | No duplicates in the list, but the operator still sees that someone asked again, and when. An upsert on the email index makes it one statement, so simultaneous requests can't make two rows. Repeats don't undo the operator's snooze or reject. |
-| **Snooze just moves a request to "Later"** | Snoozing for a set time | It means "I'll look at this later"; a timer would decide "later" for the operator. |
-| **Accepting asks for the default agent's model once, at the top of the requests page** | A model field per card; going through the new-user form | Every user needs a default agent with a model; one page-level choice (prefilled with the newest user's model) keeps accepting to one click. |
-| **Navigation is a sidebar; the admin console's is `/me`'s plus an "Operate" group above it** (users, requests, runs over agents, skills, MCPs, extensions) | Top-bar links; separate, unrelated menus per area | The list is outgrowing a top bar. Giving both areas the same lower group keeps them recognisably the same product, while each shows what it should on those pages (the console: everyone's; `/me`: yours). Unbuilt entries show as "soon" rather than empty pages. |
-| **The UI calls a set of personas a "crew"**, for any number of them, zero and one included; one is still a persona. Code and APIs keep `persona` (*reversed: everything says agent, see below*) | Switching between "persona" and "crew" by count; renaming the API and schema | A fixed word for the set reads consistently. Renaming endpoints (`/api/personas`) would break clients for a label. |
-| **Extensions are Lua scripts stored in the database and edited in the browser; there are no extensions in the repo** (replaces Elixir modules listed in config, and the built-in `datetime` and `title`) | Elixir modules in the release; Elixir compiled at runtime (`Code.compile_string`); TypeScript on a Deno sidecar; JavaScript on QuickJS/WASM; Rust compiled to WASM | Changing an extension should be "click it, edit, save", without git or a deploy. Users write their own, so the code must be sandboxed: Elixir can call anything (no sandbox is possible), Rust needs a toolchain and a build per save, Deno and QuickJS add a process or native code to operate. Lua is small, sandboxed by default, and the `lua` package runs it in Elixir with no native code, on the BEAM's process isolation. The cost: no dependencies, and a slow interpreter (fine for every hook but per-chunk ones). A second runtime (TypeScript) can be added per row later. |
-| **Extensions are global (made in `/admin`) or a user's own (made in `/me`)**; where one is made decides which, with no setting. Admins can read and edit all of them; users can read global ones | Global only; a visibility setting; users' extensions private from the operator | Users can extend their own agents without the operator. The operator sees users' code because it runs on their server and can be expensive or harmful in ways that matter; privacy of what extensions are configured with (e.g. secrets) can be solved later, both ways. |
-| **Agents enable extensions by id** (amends name → settings); the migration cleared existing entries | Names, unique across all extensions | A user's own extension may share a name with a global one; ids also make renaming free. The old entries named the removed built-ins. |
-| **Scripts reach Meridian only through the `meridian` table, always scoped to the user of the call's context** | Exposing `Meridian.Extension.API` as-is (it can read any thread) | A sandbox is only as tight as what it's given. Scoping every capability to the run's user from the start is what makes letting users write extensions safe. |
-| **Every script call starts from the state the script was loaded in; scripts are loaded once per version per node and cached in ETS, keyed by a hash of the source** | Keeping a live Lua state per extension; reloading on every call; invalidating caches over PubSub | Calls can't leak state between users or runs, and there's no shared mutable state to coordinate. Checking the hash on use means a saved script is picked up everywhere without telling anyone. State that should persist will get a key-value capability. |
-| **Each call has a timeout, a memory cap, and an instruction budget (2 million)** | Only the timeout | The budget gives a deterministic "instruction budget exceeded" for runaway loops, also while a script loads (on save, in the request). The memory cap stops a script from growing the node. |
-| **`model_stream_event` isn't available to scripts** | Calling scripts for every chunk | It fires for every streamed chunk; an interpreted script per chunk would slow every reply. |
-| **An extension's latest error is kept in memory on each node and shown on its page, live**; saving clears it | Error columns on the row; only the server log | Script authors need to see why their hook was skipped without server access. It's diagnostic, not data, so losing it on restart is fine, and it keeps the table to name, source, and owner. |
-| **Import only fills the editor; export downloads `<name>.lua`. No versions yet** | Importing straight into a saved extension; version history now | Import is copy-paste with a file picker: the script is checked when saved, like typed code. Versions are wanted but not needed to experiment. |
-| **Tools are part of extensions: `tools` in the script, next to hooks and jobs** | A separate kind of row for tools; tools only from MCP servers | A tool and a hook are both Lua functions Meridian calls with a context; only who decides to call them differs (the model, or the lifecycle). Keeping them in one script lets a feature (memory: inject in `context`, save with a `remember` tool) be one extension sharing code and settings, with no second sandbox, editor, or enablement. |
-| **Enabling an extension enables all its tools; no per-tool or per-hook switches in the core** | Per-agent tool checkboxes (a new `agents.extensions` shape); per-hook toggles | The author knows which parts belong together; switching hooks off one by one can leave an extension half-working, and hook names mean nothing to users. Optional parts are settings (and `before_run` can drop a script's own tools); different access is a different extension. Keeps `agents.extensions` as it is. |
-| **Tool names sent upstream are `<extension>__<tool>`** | The tool's own name; names chosen by the agent | Two extensions can both have a `search`; the extension name makes them unique and tells the model where a tool comes from. Upstreams allow `[a-zA-Z0-9_-]` (which extension and tool names already are), up to 64 characters; longer names are shortened, keeping them unique. |
-| **Tool failures are results for the model, not run failures** | Failing the run on any tool error | Models handle `Error: ...` well (retry, other arguments, tell the user); one bad call shouldn't throw away the run. |
-| **Tool calls are approved automatically, for now** | Building approval (`awaiting_approval`) with the loop | The point of the first version is the execution path. Approval needs runs that pause and resume, which needs `run_steps`. |
-| **`context` and `before_model_request` run before every model call; `before_run` once per run** | Calling every hook once per run | Extensions that trim or inject history must see the tool messages of earlier steps, and every request goes through the same path. The system prompt, params, and tool set are the run's and don't change between steps. |
-| **A tool call without a result is sent upstream as interrupted** | Saving placeholder results when a run ends; leaving the history as it is | Upstreams reject an assistant `tool_calls` message without a result for every call. Fixing it when the history is built covers every way a run can end (cancel, failure, a dead node) in one place. |
-| **Skills are core data, not an extension**: rows with a name, description, and prompt, global or a user's own, enabled per agent, with their own pages | A skills extension in Lua reading skills through the `meridian` table; skills as files | A skill is content, not code: writing one should be filling in a form, and it should work without someone first writing the extension that delivers it. It reuses the extension model (global or own, enabled by id, gone ids kept) so there's nothing new to learn. Amends "core features are extensions" for this one feature. |
-| **Skills reach the model by progressive disclosure: an index in the system prompt and a core `load_skill` tool** | Every enabled skill's full prompt in the system prompt; a Lua extension delivering them | Skills can be long; a description per skill keeps every request small, and the model pulls in the rest when a task needs it (the Agent Skills approach). `load_skill` is the one tool the core runs itself; it goes through the same hooks as extension tools, and its name can't clash with theirs (`<extension>__<tool>`). |
-| **A skill's recommended extensions are a warning, not a requirement** | Required extensions that enable themselves, or block the skill | Avoids hard links between skills and extensions while there's only a handful of each. The agent form says what's missing; runs don't change. |
-| **A user's own skill replaces a global one with the same name** | Both, with prefixed names; refusing the duplicate | The model addresses skills by name, so two with one name can't both be offered. Users overriding a global skill with their own version is the useful reading. |
-| **Personas are called agents, and a set of them is just "agents"; the UI, code, schema, and APIs all say `agent`** (reverses "persona" and "crew") | Keeping `persona` in code and APIs with "crew" in the UI | "Agent" is what people call this; two private words for it made the product and the code harder to follow. `/api/personas` became `/api/agents` and API key policies took `default_agent`/`allowed_agents`; a migration renamed the tables, columns, stored JSON, and `ctx.persona`/`persona_id` in extension scripts. |
+| Elixir/OTP | TS, Rust, Python | Long-lived, crash-tolerant sessions that outlive connections and fan out is what OTP is for. |
+| Postgres + Oban + PubSub | Redis/NATS, Temporal | One stateful dependency. Durable execution frameworks are overkill for one operator. |
+| Stateless `/v1` + stateful `/api` | One of them | Generic clients only speak Chat Completions; durable threads need server-owned state. |
+| `/v1` is a pure proxy, relayed byte for byte | Server tools/memory on `/v1` | Mixing server and client tool calls in a stateless response is messy. |
+| Agents are exposed as model ids | Custom headers | Works in every OpenAI client unchanged. |
+| Memory is an extension | Memory in core | The memory design is undecided, and it's the real test of the extension API. |
+| Admin console never shows conversation content | Showing everything | Running Meridian for friends shouldn't mean reading their chats. |
+| Operator and user credentials never mix | Admin scope on user keys | Different roles; a bug in `/me` can't open `/admin`. Also no bootstrap command. |
+| Meridian runs OIDC login for browser apps | Resource-server only | WorkOS doesn't allow CORS on token exchange for OAuth apps. One OIDC client for every sign-in; `ADMIN_EMAILS` separates roles. |
+| Sign-ins link by verified email; no signup | Auto-creating users | Users stay operator-created. Never relinking prevents takeover. |
+| Public access requests reveal nothing and are capped | Signup; telling people they have access | Friends can ask without exposing who uses it. |
+| Deltas coalesced before broadcast | Live tokens, coalesced persistence | One event sequence: live and replay identical, trivial dedupe. |
+| `RunServer` never blocks on upstream | Calling Req inline | A blocked server can't cancel or heartbeat, and the janitor would kill a live run. |
+| Strict completion (needs `finish_reason`) | Treating end of body as success | A dropped connection must not be saved as a full answer. |
+| No retry/resume; fail fast (3 layers) | Oban retries + checkpointed steps | Frees the thread instead of leaving it stuck. Resume needs `run_steps`. |
+| Partial replies kept on cancel | Discarding | The user saw that text. |
+| Extensions are sandboxed Lua in the DB | Elixir modules, Deno, QuickJS, WASM | Edit-and-save without a deploy, safe for users to write, pure Elixir. Cost: no deps, slow interpreter. |
+| Script calls start from loaded state; cached by source hash | Live Lua state per extension | No leakage between users or runs, no cache invalidation. |
+| Timeout + heap cap + instruction budget per call | Timeout only | Deterministic failure for runaway loops; scripts can't grow the node. |
+| Every lifecycle hook exists, used or not | Hooks on demand | Extensions shouldn't need a core change first. |
+| Extensions enabled per agent by id, off by default | Global enablement; by name | Per-user control; user and global extensions may share names. |
+| Tools are part of extensions; all-or-nothing enablement | Separate tool rows; per-tool switches | One feature = one script sharing code and settings. Optional parts are settings. |
+| Tool failures are results for the model | Failing the run | Models recover well from `Error: ...`. |
+| `context` and `before_model_request` run every step | Once per run | Extensions must see earlier steps' tool messages. |
+| Skills are core data, delivered by progressive disclosure | A skills extension; full prompts every request | A skill is content, not code; descriptions keep requests small. |
+| Everything says "agent" (was "persona") | Two words | Breaking renames are fine; clients are ours. Data was migrated. |
+| No asset build | Tailwind/esbuild | No Node toolchain; strict CSP. |
+| Kustomize bases | Helm | Plain YAML; deployment values stay out of this repo. |
 
 ## Open questions
 
-1. **Hooks on the stateless surface.** Should a minimal subset (e.g. `before_model_request`) run
-   on `/v1/*` eventually, or does that surface stay a pure agent proxy forever?
-2. ~~**Hook API shape.**~~ Decided: one function per hook (now a field of the script's table).
-   Remote extensions get translated to a generic `{hook, payload}` message at the protocol
-   boundary.
-3. ~~**Extension migrations.**~~ Moot: scripts can't run migrations. Their data will live in
-   key-value storage; what happens to it when an extension is deleted is open.
-4. **Per-run extension state.** Script calls share nothing, so state within a run needs a
-   capability too. Does it live in the `RunServer` (lost on crash, rebuilt in `run_start`), or
-   does the pipeline checkpoint it along with steps?
-5. **Ordering and conflicts.** Extensions run in name order. Is that enough, or do extensions
-   need a priority, or to declare dependencies on each other?
-6. **Agent model validation cache.** ~~How long to cache upstream `/v1/models`~~ (60 s), and
-   should agents whose model disappears be flagged?
+1. Should any hooks run on `/v1`, or does it stay a pure proxy forever?
+2. Per-run extension state: where does it live, and does it survive a crash?
+3. Is extension name order enough, or do extensions need priorities or dependencies?
+4. Extension KV storage: what happens to the data when an extension is deleted?
+5. Should agents whose upstream model disappears be flagged?

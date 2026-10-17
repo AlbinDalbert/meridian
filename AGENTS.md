@@ -11,7 +11,8 @@ Read `docs/design.md` before making architectural changes.
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 - Never hardcode deployment-specific values (hosts, URLs, credentials); everything environment-specific comes from env vars in `config/runtime.exs`
 - Keep the domain/web boundary: `lib/meridian/` is the domain (data, business logic, runs, extensions) and must never depend on `lib/meridian_web/` (HTTP, LiveView, plugs). The web layer calls into the domain, never the other way around
-- When a design decision is made or reversed, record it in the decision log in `docs/design.md`
+- When a design decision is made or reversed, record it in the decision log in `docs/design.md` (replace superseded entries rather than striking them through)
+- `BACKLOG.md` (gitignored, local only) is the backlog. Read it when picking up work; add tickets for problems you find but aren't fixing
 
 <!-- usage-rules-start -->
 
