@@ -37,6 +37,22 @@ defmodule MeridianWeb.ConnCase do
   end
 
   @doc """
+  Sets Meridian's client at the OIDC provider (`OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`) for one
+  test, which turns sign-in on. Tests that use it can't be async.
+  """
+  def put_oidc_client(client_id, client_secret \\ nil) do
+    previous = Application.fetch_env!(:meridian, Meridian.OIDC)
+
+    Application.put_env(
+      :meridian,
+      Meridian.OIDC,
+      Keyword.merge(previous, client_id: client_id, client_secret: client_secret)
+    )
+
+    ExUnit.Callbacks.on_exit(fn -> Application.put_env(:meridian, Meridian.OIDC, previous) end)
+  end
+
+  @doc """
   Logs `conn` into the admin console with the configured `ADMIN_TOKEN`.
 
       setup :log_in_admin

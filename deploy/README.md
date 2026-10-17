@@ -60,9 +60,8 @@ EXPOSE_UPSTREAM_MODELS=false
 CORS_ALLOWED_ORIGINS=
 # Optional sign-in (see the main README, "Signing in"). None of these are secrets.
 OIDC_ISSUER=
-ADMIN_OIDC_CLIENT_ID=
+OIDC_CLIENT_ID=
 ADMIN_EMAILS=
-USER_OIDC_CLIENT_ID=
 OIDC_AUDIENCES=
 ```
 
@@ -73,7 +72,7 @@ OIDC_AUDIENCES=
 DATABASE_URL=ecto://meridian:PASSWORD@meridian-postgres/meridian
 SECRET_KEY_BASE=   # openssl rand -base64 48
 ADMIN_TOKEN=       # openssl rand -base64 48; leave empty to use only sign-in (or disable /admin)
-ADMIN_OIDC_CLIENT_SECRET=   # only for a confidential admin client
+OIDC_CLIENT_SECRET=   # only for a confidential client
 LLM_API_KEY=
 ```
 

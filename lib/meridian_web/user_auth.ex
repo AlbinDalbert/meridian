@@ -28,11 +28,8 @@ defmodule MeridianWeb.UserAuth do
   @cookie "_meridian_user"
   @max_age 14 * 24 * 60 * 60
 
-  @doc "Whether users can sign in with the OIDC provider (`USER_OIDC_CLIENT_ID` is set)."
-  def enabled?, do: user_oidc() != nil and OIDC.issuer() != nil
-
-  @doc "The user sign-in client settings: `:client_id` and `:client_secret` (optional)."
-  def user_oidc, do: Application.get_env(:meridian, :user_oidc)
+  @doc "Whether users can sign in with the OIDC provider (`OIDC_CLIENT_ID` is set)."
+  def enabled?, do: OIDC.sign_in_enabled?()
 
   @doc "Starts a sign-in session for `user`, who must be linked to a provider identity."
   def log_in(conn, %User{oidc_issuer: issuer, oidc_subject: subject} = user)

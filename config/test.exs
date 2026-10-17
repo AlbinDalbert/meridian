@@ -31,15 +31,16 @@ config :meridian, :cors_allowed_origins, ["https://app.example"]
 config :meridian, :admin_token, "test-admin-token-0123456789abcdefghijklmnopqrstuvwxyz"
 
 # The OIDC provider is stubbed with Req.Test (see Meridian.OIDCStub); nothing is cached between
-# tests. Admin sign-in with it is off unless a test turns it on.
+# tests. Sign-in with it (no client id) is off unless a test turns it on.
 config :meridian, Meridian.OIDC,
   issuer: "https://auth.test",
   audiences: ["client_app"],
+  client_id: nil,
+  client_secret: nil,
   req_options: [plug: {Req.Test, Meridian.OIDC}],
   cache_ttl: 0
 
-config :meridian, :admin_oidc, nil
-config :meridian, :user_oidc, nil
+config :meridian, :admin_emails, []
 
 # One message.delta event per upstream chunk, so tests are deterministic.
 config :meridian, Meridian.Runs, delta_flush_interval: 0

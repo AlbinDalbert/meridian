@@ -87,38 +87,41 @@ if config_env() != :test do
 
   oidc_issuer = env.("OIDC_ISSUER")
   oidc_audiences = env_list.("OIDC_AUDIENCES")
-  admin_oidc_client_id = env.("ADMIN_OIDC_CLIENT_ID")
-  user_oidc_client_id = env.("USER_OIDC_CLIENT_ID")
+  oidc_client_id = env.("OIDC_CLIENT_ID")
   admin_emails = "ADMIN_EMAILS" |> env_list.() |> Enum.map(&String.downcase/1)
 
-  cond do
-    is_nil(oidc_issuer) and
-        ((oidc_audiences != [] or admin_oidc_client_id) || user_oidc_client_id) ->
-      raise "OIDC_AUDIENCES, ADMIN_OIDC_CLIENT_ID, and USER_OIDC_CLIENT_ID need OIDC_ISSUER to be set."
+  renamed =
+    for old <- ~w(ADMIN_OIDC_CLIENT_ID ADMIN_OIDC_CLIENT_SECRET USER_OIDC_CLIENT_ID
+                  USER_OIDC_CLIENT_SECRET),
+        env.(old),
+        do: old
 
-    admin_oidc_client_id && admin_emails == [] ->
-      raise "ADMIN_OIDC_CLIENT_ID is set but ADMIN_EMAILS is empty, so nobody could sign in."
+  cond do
+    renamed != [] ->
+      raise """
+      Admin and user sign-in now share one client: use OIDC_CLIENT_ID and OIDC_CLIENT_SECRET.
+      Replace these variables: #{Enum.join(renamed, ", ")}
+      """
+
+    is_nil(oidc_issuer) and (oidc_audiences != [] or oidc_client_id) ->
+      raise "OIDC_CLIENT_ID and OIDC_AUDIENCES need OIDC_ISSUER to be set."
+
+    admin_emails != [] and is_nil(oidc_client_id) ->
+      raise "ADMIN_EMAILS is set, but admin sign-in also needs OIDC_CLIENT_ID."
 
     true ->
       :ok
   end
 
-  config :meridian, Meridian.OIDC, issuer: oidc_issuer, audiences: oidc_audiences
+  # One client signs in both operators (/admin, if their email is in ADMIN_EMAILS) and users of
+  # browser apps served on the same origin as /api (e.g. xebec).
+  config :meridian, Meridian.OIDC,
+    issuer: oidc_issuer,
+    audiences: oidc_audiences,
+    client_id: oidc_client_id,
+    client_secret: env.("OIDC_CLIENT_SECRET")
 
-  config :meridian,
-         :admin_oidc,
-         admin_oidc_client_id &&
-           [
-             client_id: admin_oidc_client_id,
-             client_secret: env.("ADMIN_OIDC_CLIENT_SECRET"),
-             emails: admin_emails
-           ]
-
-  # User sign-in for browser apps served on the same origin as /api (e.g. xebec).
-  config :meridian,
-         :user_oidc,
-         user_oidc_client_id &&
-           [client_id: user_oidc_client_id, client_secret: env.("USER_OIDC_CLIENT_SECRET")]
+  config :meridian, :admin_emails, admin_emails
 
   # Browser apps allowed to call /v1 and /api: comma-separated origins, or "*".
   cors_allowed_origins =

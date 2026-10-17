@@ -31,7 +31,7 @@ defmodule MeridianWeb.Admin.OIDCController do
          },
          {:ok, url} <-
            OIDC.authorize_url(
-             client_id: AdminAuth.admin_oidc()[:client_id],
+             client_id: OIDC.client()[:client_id],
              redirect_uri: redirect_uri(),
              state: flow.state,
              nonce: flow.nonce,
@@ -81,7 +81,7 @@ defmodule MeridianWeb.Admin.OIDCController do
 
   # Exchanges the code and returns the verified email.
   defp authenticate(code, flow) do
-    config = AdminAuth.admin_oidc()
+    config = OIDC.client()
 
     with {:ok, claims} <-
            OIDC.complete_sign_in(

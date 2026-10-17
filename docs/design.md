@@ -180,8 +180,8 @@ Admin access belongs to the **operator of the deployment**, not to a Meridian us
 its own credentials. Either or both of these can be enabled; with neither, `/admin` is disabled
 entirely.
 
-- **Sign-in with the OIDC provider** (`OIDC_ISSUER`, `ADMIN_OIDC_CLIENT_ID`, optional
-  `ADMIN_OIDC_CLIENT_SECRET`, `ADMIN_EMAILS`): authorization code flow with PKCE, `state`, and
+- **Sign-in with the OIDC provider** (`OIDC_ISSUER`, `OIDC_CLIENT_ID`, optional
+  `OIDC_CLIENT_SECRET`, `ADMIN_EMAILS`): authorization code flow with PKCE, `state`, and
   `nonce`. The ID token is verified (signature, issuer, audience, nonce); the operator gets in if
   the verified email is in `ADMIN_EMAILS`. The session stores the email, so removing it from
   `ADMIN_EMAILS` logs them out. Being able to sign in to the provider is not enough: the
@@ -439,7 +439,7 @@ permissions and see everything. Remote extensions see only what their hook subsc
   without a matching user the request is refused. The operator can unlink in the admin UI.
   Signed-in users get the default policy (all their personas). Run events tokens are tied to
   the user instead of a key. Access tokens aren't checked for revocation; they are short-lived.
-- **Sign-in sessions** (optional, `USER_OIDC_CLIENT_ID`) are for browser apps without a backend,
+- **Sign-in sessions** (on whenever `OIDC_CLIENT_ID` is set) are for browser apps without a backend,
   such as xebec. They can't run the login themselves: the code-for-token exchange is a browser
   request to the provider's token endpoint, which needs CORS from the provider, and WorkOS
   doesn't allow it for OAuth applications. So Meridian runs it under `/api/auth` (login,
@@ -550,9 +550,8 @@ is in the repo.
 | `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call `/v1` and `/api` (comma-separated, or `*`). Unset = none |
 | `ADMIN_TOKEN`          | Enables `/admin`; the secret used to log in. Unset (and no admin sign-in) = admin disabled |
 | `OIDC_ISSUER`          | OIDC provider for sign-in (admin and clients), exactly as its tokens' `iss` |
-| `ADMIN_OIDC_CLIENT_ID`, `ADMIN_OIDC_CLIENT_SECRET` | Admin sign-in client (the secret only for confidential clients) |
-| `ADMIN_EMAILS`         | Emails allowed into `/admin` via sign-in (comma-separated) |
-| `USER_OIDC_CLIENT_ID`, `USER_OIDC_CLIENT_SECRET` | User sign-in for browser apps (`/api/auth`) |
+| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | Meridian's client at the provider, for admin and user sign-in (the secret only for confidential clients) |
+| `ADMIN_EMAILS`         | Emails allowed into `/admin` via sign-in (comma-separated); unset = admin sign-in off |
 | `OIDC_AUDIENCES`       | Client ids whose access tokens `/v1` and `/api` accept. Unset = API keys only |
 | `EXTENSIONS_DIR`       | Optional directory of `.ex` extensions compiled at boot (if we do that) |
 
@@ -659,6 +658,7 @@ Add an entry whenever a decision is made or reversed.
 | ~~**Clients may authenticate with OIDC access tokens; Meridian is a resource server, not an authorization server**~~ *Amended, see "Meridian runs the login for browser apps" below* | Meridian running the login and minting its own tokens or API keys per client; cookie sessions for `/api` | Keeps one client contract (a bearer token) and keeps Meridian ignorant of clients. Clients use the provider's SDKs; Meridian only verifies. No cookies keeps the CORS reasoning intact. API keys stay for generic clients. |
 | **Sign-ins link to existing users by verified email; no signup** | Auto-creating users on first sign-in; the operator entering provider subject ids | Users stay operator-created. Email is what the operator already knows; the subject is stored on first sign-in so later changes to the email don't move the account. Never relinking a linked user stops a new identity with the same email from taking over. |
 | **Meridian runs the login for browser apps, with a cookie session on `/api`** (amends "Meridian is a resource server") | The app proxying the provider's token endpoint to get around CORS; a separate backend per app; the provider's browser SDK (a different WorkOS product, with its own tokens) | A static app can't trade the code for tokens: WorkOS's token endpoint doesn't send CORS headers for OAuth applications. Meridian already runs this flow for `/admin` and owns users and identities, so it owns the whole sign-in and apps stay ignorant of the provider. The cookie is same-origin only, so the CORS reasoning holds. Access tokens (`OIDC_AUDIENCES`) stay for clients that log in themselves. |
+| **One OIDC client for admin and user sign-in** (`OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET`; amends the two entries above) | Separate admin and user clients (`ADMIN_OIDC_CLIENT_*`, `USER_OIDC_CLIENT_*`) | Both flows are Meridian signing someone in, so they are one app at the provider with two redirect URIs; two clients only meant two of each setting. What separates the roles is `ADMIN_EMAILS`, not the client: a user sign-in never creates an admin session, and admin sign-in is off without the allowlist. The old variable names fail at boot with a pointer to the new ones. |
 | **Generic and environment-agnostic** | Assuming a specific inference server or cluster | Public project. Everything deployment-specific comes from env vars; deployment values live in the operator's own infrastructure repo. |
 | **Persona resolution on `/v1`**: `meridian/<slug>` → that persona (404 if unknown or not allowed); a raw upstream id → passthrough when `EXPOSE_UPSTREAM_MODELS`; anything else → the key's `default_persona`, else the user's default persona | Rejecting unknown models; falling back for unknown `meridian/` slugs too | Clients with a hardcoded model name (`gpt-4o`) still work, but a typo in an explicit persona id fails loudly instead of silently using the wrong persona. |
 | **Persona system prompt goes first, merged into the client's leading system/developer message** | A separate extra system message; appending after the client's | Some chat templates reject more than one system message or one that isn't first. The persona's identity comes before the client's (e.g. a coding agent's) instructions. |

@@ -39,7 +39,7 @@ defmodule MeridianWeb.Api.AuthController do
     return_to = return_to(params)
 
     with true <- UserAuth.enabled?(),
-         config = UserAuth.user_oidc(),
+         config = OIDC.client(),
          flow = %{
            state: OIDC.random_token(),
            nonce: OIDC.random_token(),
@@ -105,7 +105,7 @@ defmodule MeridianWeb.Api.AuthController do
   end
 
   defp complete_sign_in(code, flow) do
-    config = UserAuth.user_oidc()
+    config = OIDC.client()
 
     OIDC.complete_sign_in(
       client_id: config[:client_id],

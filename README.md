@@ -75,24 +75,24 @@ is revoked. `EventSource` resumes on its own after a dropped connection (it send
 
 Instead of tokens and keys, operators and users can sign in through any OpenID Connect
 provider: [WorkOS AuthKit](https://workos.com/docs/authkit), Keycloak, Authentik, Google, Entra.
-All three parts are optional and independent.
+Meridian signs people in with one client at the provider: set `OIDC_ISSUER`, `OIDC_CLIENT_ID`,
+and `OIDC_CLIENT_SECRET` (for a confidential client; omit it for a public one, Meridian always
+uses PKCE). Register both redirect URIs below with that client.
 
-**Admin console.** Set `OIDC_ISSUER`, `ADMIN_OIDC_CLIENT_ID` (and `ADMIN_OIDC_CLIENT_SECRET` for
-a confidential client), and `ADMIN_EMAILS`. `/admin/login` then shows a "Sign in" button; you
-get in if the provider says your email is verified and it's in `ADMIN_EMAILS`. Register
-`https://<PHX_HOST>/admin/auth/callback` as the redirect URI. `ADMIN_TOKEN` can stay set as a
-fallback for when the provider is down, or be left unset.
+**Admin console.** Also set `ADMIN_EMAILS`. `/admin/login` then shows a "Sign in" button; you
+get in if the provider says your email is verified and it's in `ADMIN_EMAILS`. Redirect URI:
+`https://<PHX_HOST>/admin/auth/callback`. `ADMIN_TOKEN` can stay set as a fallback for when the
+provider is down, or be left unset.
 
-**Browser apps** (e.g. [xebec](../xebec)). Set `USER_OIDC_CLIENT_ID` (and
-`USER_OIDC_CLIENT_SECRET` for a confidential client). Meridian then runs the login for the app,
-like it does for `/admin`: the app links its "Sign in" button to
+**Browser apps** (e.g. [xebec](../xebec)). On whenever the client is set. Meridian runs the
+login for the app, like it does for `/admin`: the app links its "Sign in" button to
 `/api/auth/login?return_to=/some/path`, Meridian sends the browser to the provider and back to
 `/api/auth/callback`, and starts a session in a cookie that `/api` accepts instead of a bearer
 token. The app must be served on the same origin as `/api` (a reverse proxy routing `/api` to
 Meridian, as xebec's image does), and requests that change something must send an
 `X-Requested-With` header. `GET /api/auth/session` says whether sign-in is available and who is
-signed in; `POST /api/auth/logout` ends the session. Users are linked by email as below. Register
-`https://<app host>/api/auth/callback` as the redirect URI; behind a proxy, Meridian builds it
+signed in; `POST /api/auth/logout` ends the session. Users are linked by email as below.
+Redirect URI: `https://<app host>/api/auth/callback`; behind a proxy, Meridian builds it
 from `X-Forwarded-Host` and `X-Forwarded-Proto`.
 
 This is for apps without a backend of their own. They can't run the login themselves: the
@@ -112,13 +112,11 @@ With WorkOS:
 
 1. In the WorkOS dashboard, under AuthKit, note your AuthKit domain. That is `OIDC_ISSUER`,
    e.g. `https://your-name.authkit.app`.
-2. Under Connect → OAuth applications, create a first-party application for the admin console
-   (confidential, redirect URI as above). Its client id and secret are `ADMIN_OIDC_CLIENT_ID` and
-   `ADMIN_OIDC_CLIENT_SECRET`.
-3. For browser apps, create another first-party application (public is fine: Meridian uses
-   PKCE), with redirect URI `https://<app host>/api/auth/callback`. Its client id is
-   `USER_OIDC_CLIENT_ID`.
-4. For clients that run the login themselves, create a first-party application each (public,
+2. Under Connect, create an OAuth application for Meridian: first-party, confidential, with the
+   redirect URIs `https://<PHX_HOST>/admin/auth/callback` and
+   `https://<app host>/api/auth/callback` for each browser app. Its client id and secret are
+   `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
+3. For clients that run the login themselves, create a first-party application each (public,
    with the client's own redirect URI) and add its client id to `OIDC_AUDIENCES`.
 
 Other endpoints: `GET/PATCH/DELETE /api/threads/:id`, `GET /api/runs/:id`, and
@@ -159,13 +157,11 @@ docker run -p 4000:4000 \
 | `LLM_API_KEY`     | no       | Upstream API key, sent as a bearer token |
 | `EXPOSE_UPSTREAM_MODELS` | no | `true` to also list raw upstream models in `/v1/models` |
 | `CORS_ALLOWED_ORIGINS` | no  | Browser apps allowed to call `/v1` and `/api`: comma-separated origins (`https://chat.example.com,http://localhost:5173`) or `*`. Unset means none |
-| `ADMIN_TOKEN`     | no       | Enables `/admin` and is the secret to log in with (32+ chars). With neither this nor admin sign-in set, the admin console is disabled |
+| `ADMIN_TOKEN`     | no       | Enables `/admin` and is the secret to log in with (32+ chars). With neither this nor `ADMIN_EMAILS` set, the admin console is disabled |
 | `OIDC_ISSUER`     | no       | OIDC provider for sign-in, exactly as its tokens' `iss` (e.g. `https://your-name.authkit.app`). See [Signing in](#signing-in-oidc-eg-workos-authkit) |
-| `ADMIN_OIDC_CLIENT_ID` | no  | Enables admin sign-in with the provider |
-| `ADMIN_OIDC_CLIENT_SECRET` | no | The admin client's secret (confidential clients; omit for a public client) |
-| `ADMIN_EMAILS`    | with `ADMIN_OIDC_CLIENT_ID` | Comma-separated emails allowed into `/admin` |
-| `USER_OIDC_CLIENT_ID` | no   | Enables user sign-in for browser apps, through `/api/auth` |
-| `USER_OIDC_CLIENT_SECRET` | no | That client's secret (confidential clients; omit for a public client) |
+| `OIDC_CLIENT_ID`  | no       | Meridian's client at the provider. Enables user sign-in for browser apps (`/api/auth`), and admin sign-in with `ADMIN_EMAILS` |
+| `OIDC_CLIENT_SECRET` | no    | That client's secret (confidential clients; omit for a public client) |
+| `ADMIN_EMAILS`    | no       | Comma-separated emails allowed into `/admin` via sign-in. Needs `OIDC_CLIENT_ID` |
 | `OIDC_AUDIENCES`  | no       | Comma-separated client ids whose access tokens `/v1` and `/api` accept. Unset means API keys only |
 
 \* Meridian starts without it, but can't serve completions.

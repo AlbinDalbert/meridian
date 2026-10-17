@@ -5,7 +5,7 @@ defmodule MeridianWeb.AdminAuth do
   Admin access belongs to the operator of the deployment, not to a Meridian user, so it has its
   own ways in. Either or both can be enabled; with neither, `/admin` is disabled entirely.
 
-    * **Sign-in with the OIDC provider** (`OIDC_ISSUER` + `ADMIN_OIDC_CLIENT_ID`): the operator
+    * **Sign-in with the OIDC provider** (`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `ADMIN_EMAILS`): the operator
       logs in at the provider and gets in if their verified email is in `ADMIN_EMAILS`.
       The session stores the email; removing it from `ADMIN_EMAILS` logs them out.
     * **The `ADMIN_TOKEN` secret**, pasted into the login form. The session stores a hash of the
@@ -45,19 +45,11 @@ defmodule MeridianWeb.AdminAuth do
   @doc "Whether operators can log in with `ADMIN_TOKEN`."
   def token_login?, do: admin_token() != nil
 
-  @doc "Whether operators can sign in with the OIDC provider."
-  def oidc_login?, do: admin_oidc() != nil and Meridian.OIDC.issuer() != nil
-
-  @doc "The admin OIDC client settings: `:client_id`, `:client_secret` (optional), `:emails`."
-  def admin_oidc, do: Application.get_env(:meridian, :admin_oidc)
+  @doc "Whether operators can sign in with the OIDC provider (it is set up and `ADMIN_EMAILS` too)."
+  def oidc_login?, do: Meridian.OIDC.sign_in_enabled?() and admin_emails() != []
 
   @doc "Whether `email` is one of `ADMIN_EMAILS` (case-insensitive)."
-  def admin_email?(email) when is_binary(email) do
-    case admin_oidc() do
-      nil -> false
-      config -> normalize_email(email) in config[:emails]
-    end
-  end
+  def admin_email?(email) when is_binary(email), do: normalize_email(email) in admin_emails()
 
   def admin_email?(_email), do: false
 
@@ -152,6 +144,9 @@ defmodule MeridianWeb.AdminAuth do
   end
 
   defp admin_token, do: Application.get_env(:meridian, :admin_token)
+
+  # Lowercased by config/runtime.exs.
+  defp admin_emails, do: Application.get_env(:meridian, :admin_emails, [])
 
   defp hash(token), do: :crypto.hash(:sha256, token)
 

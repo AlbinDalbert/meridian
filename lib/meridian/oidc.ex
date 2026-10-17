@@ -29,6 +29,19 @@ defmodule Meridian.OIDC do
   @doc "Audiences accepted on client access tokens (`OIDC_AUDIENCES`)."
   def audiences, do: config(:audiences, [])
 
+  @doc """
+  Meridian's own client at the provider (`OIDC_CLIENT_ID`, optional `OIDC_CLIENT_SECRET`), used
+  to sign operators into `/admin` and users of browser apps into `/api`. `nil` if unset.
+  """
+  def client do
+    if client_id = config(:client_id) do
+      [client_id: client_id, client_secret: config(:client_secret)]
+    end
+  end
+
+  @doc "Whether people can sign in through Meridian (`OIDC_ISSUER` and `OIDC_CLIENT_ID` are set)."
+  def sign_in_enabled?, do: issuer() != nil and client() != nil
+
   @doc "Whether clients may authenticate with an access token from the provider."
   def client_tokens_enabled?, do: issuer() != nil and audiences() != []
 

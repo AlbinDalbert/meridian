@@ -1,5 +1,5 @@
 defmodule MeridianWeb.Api.AuthControllerTest do
-  # Not async: tests change the :user_oidc application env.
+  # Not async: tests change the OIDC client application env.
   use MeridianWeb.ConnCase
 
   import Meridian.Fixtures
@@ -13,7 +13,7 @@ defmodule MeridianWeb.Api.AuthControllerTest do
   @moduletag :capture_log
 
   setup do
-    put_env(:user_oidc, client_id: "web_client")
+    put_oidc_client("web_client")
     %{user: user_fixture(%{"email" => "Ada@Example.com"})}
   end
 
@@ -54,7 +54,7 @@ defmodule MeridianWeb.Api.AuthControllerTest do
     assert %{"data" => %{"sign_in" => true, "user" => nil}} =
              conn |> get(~p"/api/auth/session") |> json_response(200)
 
-    put_env(:user_oidc, nil)
+    put_oidc_client(nil)
 
     assert %{"data" => %{"sign_in" => false}} =
              build_conn() |> get(~p"/api/auth/session") |> json_response(200)
@@ -201,11 +201,5 @@ defmodule MeridianWeb.Api.AuthControllerTest do
     Req.Test.stub(OIDC, &Plug.Conn.send_resp(&1, 500, "down"))
     conn = get(conn, ~p"/api/auth/login")
     assert redirected_to(conn) == "/?sign_in_error=unavailable"
-  end
-
-  defp put_env(key, value) do
-    previous = Application.fetch_env!(:meridian, key)
-    Application.put_env(:meridian, key, value)
-    on_exit(fn -> Application.put_env(:meridian, key, previous) end)
   end
 end

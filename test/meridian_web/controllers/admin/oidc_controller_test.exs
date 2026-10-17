@@ -1,5 +1,5 @@
 defmodule MeridianWeb.Admin.OIDCControllerTest do
-  # Not async: tests change the :admin_oidc and :admin_token application env.
+  # Not async: tests change the OIDC client, :admin_emails, and :admin_token application env.
   use MeridianWeb.ConnCase
 
   alias Meridian.OIDC
@@ -8,11 +8,8 @@ defmodule MeridianWeb.Admin.OIDCControllerTest do
   @moduletag :capture_log
 
   setup do
-    put_env(:admin_oidc,
-      client_id: "admin_client",
-      client_secret: "admin_secret",
-      emails: ["ops@example.com"]
-    )
+    put_oidc_client("admin_client", "admin_secret")
+    put_env(:admin_emails, ["ops@example.com"])
 
     :ok
   end
@@ -66,7 +63,7 @@ defmodule MeridianWeb.Admin.OIDCControllerTest do
     assert html_response(get(conn, ~p"/admin/users"), 200) =~ "Users"
 
     # Taking the email off ADMIN_EMAILS ends the session.
-    put_env(:admin_oidc, client_id: "admin_client", emails: ["someone@example.com"])
+    put_env(:admin_emails, ["someone@example.com"])
     assert redirected_to(get(recycle(conn), ~p"/admin/users")) == ~p"/admin/login"
   end
 
@@ -138,8 +135,8 @@ defmodule MeridianWeb.Admin.OIDCControllerTest do
     refute html =~ "Admin token"
   end
 
-  test "without admin OIDC config, the sign-in routes are 404", %{conn: conn} do
-    put_env(:admin_oidc, nil)
+  test "without ADMIN_EMAILS, admin sign-in is off and its routes are 404", %{conn: conn} do
+    put_env(:admin_emails, [])
     assert response(get(conn, ~p"/admin/auth/oidc"), 404)
     refute conn |> get(~p"/admin/login") |> html_response(200) =~ "/admin/auth/oidc"
   end

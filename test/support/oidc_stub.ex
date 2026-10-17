@@ -1,7 +1,7 @@
 defmodule Meridian.OIDCStub do
   @moduledoc """
   A fake OIDC provider for tests, at the issuer configured in `config/test.exs`
-  (`https://auth.test`). Tokens are signed with a test RSA key generated once per run.
+  (`https://auth.test`). Tokens are signed with a test RSA key generated once per run (`setup_key/0`).
 
       Meridian.OIDCStub.stub(userinfo: %{"sub" => "user_1", "email" => "ada@example.com"})
       token = Meridian.OIDCStub.sign(%{"sub" => "user_1"})
@@ -110,17 +110,12 @@ defmodule Meridian.OIDCStub do
     }
   end
 
-  defp private_key do
-    case :persistent_term.get({__MODULE__, :key}, nil) do
-      nil ->
-        key = :public_key.generate_key({:rsa, 2048, 65_537})
-        :persistent_term.put({__MODULE__, :key}, key)
-        key
-
-      key ->
-        key
-    end
+  @doc "Generates the signing key. Called once from test_helper.exs, before tests run concurrently."
+  def setup_key do
+    :persistent_term.put({__MODULE__, :key}, :public_key.generate_key({:rsa, 2048, 65_537}))
   end
+
+  defp private_key, do: :persistent_term.get({__MODULE__, :key})
 
   defp encode(map), do: map |> Jason.encode!() |> Base.url_encode64(padding: false)
 end
