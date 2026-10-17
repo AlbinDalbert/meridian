@@ -9,10 +9,10 @@ defmodule MeridianWeb.V1.ModelController do
   alias Meridian.Proxy
 
   def index(conn, _params) do
-    %{current_user: user, current_api_key: api_key} = conn.assigns
+    %{current_user: user, current_policy: policy} = conn.assigns
 
     data =
-      for model <- Proxy.list_models(user, api_key.policy) do
+      for model <- Proxy.list_models(user, policy) do
         case model do
           {:persona, persona} ->
             %{

@@ -6,7 +6,7 @@ defmodule MeridianWeb.Api.ThreadJSON do
   def index(%{threads: threads}), do: %{data: Enum.map(threads, &data/1)}
 
   def show(%{thread: thread} = assigns) do
-    active_run = if run = assigns[:active_run], do: RunJSON.data(run, assigns.current_api_key)
+    active_run = if run = assigns[:active_run], do: RunJSON.data(run, RunJSON.credential(assigns))
     %{data: Map.put(data(thread), :active_run, active_run)}
   end
 

@@ -61,6 +61,19 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
     assert Accounts.authenticate_api_key(api_key.token) == :error
   end
 
+  test "unlinking a user's sign-in", %{conn: conn} do
+    user =
+      user_fixture()
+      |> Ecto.Changeset.change(oidc_issuer: "https://auth.test", oidc_subject: "user_ada")
+      |> Meridian.Repo.update!()
+
+    {:ok, lv, html} = live(conn, ~p"/admin/users/#{user}")
+    assert html =~ "user_ada"
+
+    assert lv |> element("button", "Unlink") |> render_click() =~ "Sign-in unlinked."
+    assert %{oidc_subject: nil, oidc_issuer: nil} = Accounts.get_user!(user.id)
+  end
+
   test "creating and editing a persona", %{conn: conn} do
     user = user_fixture()
     stub_upstream_down()

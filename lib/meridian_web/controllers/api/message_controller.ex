@@ -19,10 +19,10 @@ defmodule MeridianWeb.Api.MessageController do
   end
 
   def create(conn, %{"thread_id" => thread_id}) do
-    %{current_user: user, current_api_key: api_key} = conn.assigns
+    %{current_user: user, current_policy: policy} = conn.assigns
 
     with %{} = thread <- Threads.get_user_thread(user, thread_id),
-         {:ok, message, run} <- Threads.send_message(thread, api_key.policy, conn.body_params) do
+         {:ok, message, run} <- Threads.send_message(thread, policy, conn.body_params) do
       conn
       |> put_status(:accepted)
       |> render(:create, message: message, run: run)

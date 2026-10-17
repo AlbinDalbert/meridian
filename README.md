@@ -71,6 +71,37 @@ The token only reads that run's events, expires after an hour, and stops working
 is revoked. `EventSource` resumes on its own after a dropped connection (it sends
 `Last-Event-ID`); once a run has ended, a reconnect gets `204`, which makes it stop.
 
+### Signing in (OIDC, e.g. WorkOS AuthKit)
+
+Instead of tokens and keys, operators and users can sign in through any OpenID Connect
+provider: [WorkOS AuthKit](https://workos.com/docs/authkit), Keycloak, Authentik, Google, Entra.
+Both parts are optional and independent.
+
+**Admin console.** Set `OIDC_ISSUER`, `ADMIN_OIDC_CLIENT_ID` (and `ADMIN_OIDC_CLIENT_SECRET` for
+a confidential client), and `ADMIN_EMAILS`. `/admin/login` then shows a "Sign in" button; you
+get in if the provider says your email is verified and it's in `ADMIN_EMAILS`. Register
+`https://<PHX_HOST>/admin/auth/callback` as the redirect URI. `ADMIN_TOKEN` can stay set as a
+fallback for when the provider is down, or be left unset.
+
+**Clients.** Set `OIDC_AUDIENCES` to the client ids of your apps. A client then runs the login
+itself (with the provider's SDK, using PKCE) and sends the access token as
+`Authorization: Bearer <token>` where it would send an API key. Meridian checks the signature
+(RS256, keys from the provider's JWKS), issuer, audience, and expiry. The first time someone
+signs in, they are linked to the Meridian user with the same email (fetched from the provider's
+userinfo endpoint, so request the `openid email` scopes). There is no signup: create the user
+in the admin console first. Signed-in users can use all of their personas. API keys keep
+working, and are still the way in for generic OpenAI clients.
+
+With WorkOS:
+
+1. In the WorkOS dashboard, under AuthKit, note your AuthKit domain. That is `OIDC_ISSUER`,
+   e.g. `https://your-name.authkit.app`.
+2. Under Connect → OAuth applications, create a first-party application for the admin console
+   (confidential, redirect URI as above). Its client id and secret are `ADMIN_OIDC_CLIENT_ID` and
+   `ADMIN_OIDC_CLIENT_SECRET`.
+3. For each client app, create another first-party application (public, so it uses PKCE and has
+   no secret, with the app's own redirect URI) and add its client id to `OIDC_AUDIENCES`.
+
 Other endpoints: `GET/PATCH/DELETE /api/threads/:id`, `GET /api/runs/:id`, and
 `POST /api/runs/:id/cancel`. The admin console shows threads and runs, including a live view
 of a run as it generates.
@@ -109,6 +140,11 @@ docker run -p 4000:4000 \
 | `LLM_API_KEY`     | no       | Upstream API key, sent as a bearer token |
 | `EXPOSE_UPSTREAM_MODELS` | no | `true` to also list raw upstream models in `/v1/models` |
 | `CORS_ALLOWED_ORIGINS` | no  | Browser apps allowed to call `/v1` and `/api`: comma-separated origins (`https://chat.example.com,http://localhost:5173`) or `*`. Unset means none |
-| `ADMIN_TOKEN`     | no       | Enables `/admin` and is the secret to log in with (32+ chars). Unset disables the admin console |
+| `ADMIN_TOKEN`     | no       | Enables `/admin` and is the secret to log in with (32+ chars). With neither this nor admin sign-in set, the admin console is disabled |
+| `OIDC_ISSUER`     | no       | OIDC provider for sign-in, exactly as its tokens' `iss` (e.g. `https://your-name.authkit.app`). See [Signing in](#signing-in-oidc-eg-workos-authkit) |
+| `ADMIN_OIDC_CLIENT_ID` | no  | Enables admin sign-in with the provider |
+| `ADMIN_OIDC_CLIENT_SECRET` | no | The admin client's secret (confidential clients; omit for a public client) |
+| `ADMIN_EMAILS`    | with `ADMIN_OIDC_CLIENT_ID` | Comma-separated emails allowed into `/admin` |
+| `OIDC_AUDIENCES`  | no       | Comma-separated client ids whose access tokens `/v1` and `/api` accept. Unset means API keys only |
 
 \* Meridian starts without it, but can't serve completions.

@@ -14,11 +14,11 @@ defmodule MeridianWeb.V1.ChatCompletionController do
   alias MeridianWeb.V1.OpenAIError
 
   def create(conn, _params) do
-    %{current_user: user, current_api_key: api_key} = conn.assigns
+    %{current_user: user, current_policy: policy} = conn.assigns
     # Only the JSON body is forwarded; `params` would also include the query string.
     params = conn.body_params
 
-    case Proxy.resolve_model(user, api_key.policy, params["model"]) do
+    case Proxy.resolve_model(user, policy, params["model"]) do
       {:ok, model} ->
         model |> Proxy.build_request(params) |> relay(conn)
 

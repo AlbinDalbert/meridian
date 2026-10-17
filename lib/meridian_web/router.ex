@@ -67,6 +67,8 @@ defmodule MeridianWeb.Router do
     get "/login", SessionController, :new
     post "/login", SessionController, :create
     post "/logout", SessionController, :delete
+    get "/auth/oidc", OIDCController, :new
+    get "/auth/callback", OIDCController, :callback
   end
 
   scope "/admin", MeridianWeb.Admin do

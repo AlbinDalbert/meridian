@@ -1,7 +1,10 @@
 defmodule Meridian.Accounts.User do
   @moduledoc """
-  A Meridian user. Users are created by the operator; there is no signup or user login.
-  Clients identify a user with one of the user's API keys.
+  A Meridian user. Users are created by the operator; there is no signup.
+
+  Clients identify a user with one of the user's API keys, or with an access token from the
+  configured OIDC provider (see `Meridian.OIDC`). A user's OIDC identity (`oidc_issuer` +
+  `oidc_subject`) is linked on their first sign-in, by matching their verified email.
   """
   use Meridian.Schema
 
@@ -12,6 +15,9 @@ defmodule Meridian.Accounts.User do
   schema "users" do
     field :name, :string
     field :email, :string
+    # Set on first sign-in, never cast from user input.
+    field :oidc_issuer, :string
+    field :oidc_subject, :string
 
     has_many :api_keys, Meridian.Accounts.ApiKey
     has_many :personas, Meridian.Personas.Persona

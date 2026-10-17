@@ -2,12 +2,16 @@ defmodule MeridianWeb.AdminAuth do
   @moduledoc """
   Authentication for the operator console under `/admin`.
 
-  Admin access belongs to the operator of the deployment, not to a Meridian user, so it uses its
-  own credential: the `ADMIN_TOKEN` secret. If it is unset, `/admin` is disabled entirely.
+  Admin access belongs to the operator of the deployment, not to a Meridian user, so it has its
+  own ways in. Either or both can be enabled; with neither, `/admin` is disabled entirely.
 
-  Logging in stores a hash of the token and the login time in a signed cookie scoped to
-  `/admin`. A session is valid only while it is younger than 12 hours
-  and its hash matches the current token, so rotating the token logs everyone out.
+    * **Sign-in with the OIDC provider** (`OIDC_ISSUER` + `ADMIN_OIDC_CLIENT_ID`): the operator
+      logs in at the provider and gets in if their verified email is in `ADMIN_EMAILS`.
+      The session stores the email; removing it from `ADMIN_EMAILS` logs them out.
+    * **The `ADMIN_TOKEN` secret**, pasted into the login form. The session stores a hash of the
+      token, so rotating the token logs everyone out.
+
+  Both kinds of session live in a signed cookie scoped to `/admin` and expire after 12 hours.
   """
   use MeridianWeb, :verified_routes
 
@@ -16,6 +20,7 @@ defmodule MeridianWeb.AdminAuth do
 
   @max_age_seconds 12 * 60 * 60
   @token_hash_key "admin_token_hash"
+  @email_key "admin_email"
   @signed_in_at_key "admin_signed_in_at"
 
   @doc """
@@ -34,8 +39,27 @@ defmodule MeridianWeb.AdminAuth do
     ]
   end
 
-  @doc "Whether the admin console is enabled (`ADMIN_TOKEN` is set)."
-  def enabled?, do: admin_token() != nil
+  @doc "Whether the admin console is enabled (`ADMIN_TOKEN` or admin OIDC sign-in is set up)."
+  def enabled?, do: token_login?() or oidc_login?()
+
+  @doc "Whether operators can log in with `ADMIN_TOKEN`."
+  def token_login?, do: admin_token() != nil
+
+  @doc "Whether operators can sign in with the OIDC provider."
+  def oidc_login?, do: admin_oidc() != nil and Meridian.OIDC.issuer() != nil
+
+  @doc "The admin OIDC client settings: `:client_id`, `:client_secret` (optional), `:emails`."
+  def admin_oidc, do: Application.get_env(:meridian, :admin_oidc)
+
+  @doc "Whether `email` is one of `ADMIN_EMAILS` (case-insensitive)."
+  def admin_email?(email) when is_binary(email) do
+    case admin_oidc() do
+      nil -> false
+      config -> normalize_email(email) in config[:emails]
+    end
+  end
+
+  def admin_email?(_email), do: false
 
   @doc "Constant-time check of a submitted token against `ADMIN_TOKEN`."
   def valid_token?(token) when is_binary(token) do
@@ -47,12 +71,24 @@ defmodule MeridianWeb.AdminAuth do
 
   def valid_token?(_token), do: false
 
-  @doc "Starts an admin session on `conn`."
+  @doc "Starts an admin session on `conn` after a valid `ADMIN_TOKEN`."
   def log_in(conn) do
+    conn
+    |> new_session()
+    |> put_session(@token_hash_key, Base.encode64(hash(admin_token())))
+  end
+
+  @doc "Starts an admin session on `conn` for an operator signed in with the OIDC provider."
+  def log_in_oidc(conn, email) do
+    conn
+    |> new_session()
+    |> put_session(@email_key, normalize_email(email))
+  end
+
+  defp new_session(conn) do
     conn
     |> configure_session(renew: true)
     |> clear_session()
-    |> put_session(@token_hash_key, Base.encode64(hash(admin_token())))
     |> put_session(@signed_in_at_key, System.system_time(:second))
   end
 
@@ -68,6 +104,12 @@ defmodule MeridianWeb.AdminAuth do
     else
       _ -> false
     end
+  end
+
+  def admin_session?(%{@email_key => email, @signed_in_at_key => signed_in_at})
+      when is_binary(email) and is_integer(signed_in_at) do
+    oidc_login?() and admin_email?(email) and
+      System.system_time(:second) - signed_in_at < @max_age_seconds
   end
 
   def admin_session?(_session), do: false
@@ -112,4 +154,6 @@ defmodule MeridianWeb.AdminAuth do
   defp admin_token, do: Application.get_env(:meridian, :admin_token)
 
   defp hash(token), do: :crypto.hash(:sha256, token)
+
+  defp normalize_email(email), do: email |> String.trim() |> String.downcase()
 end

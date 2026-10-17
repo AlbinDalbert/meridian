@@ -58,6 +58,11 @@ PHX_HOST=meridian.example.com
 LLM_BASE_URL=http://my-inference-server:8080/v1
 EXPOSE_UPSTREAM_MODELS=false
 CORS_ALLOWED_ORIGINS=
+# Optional sign-in (see the main README, "Signing in"). None of these are secrets.
+OIDC_ISSUER=
+ADMIN_OIDC_CLIENT_ID=
+ADMIN_EMAILS=
+OIDC_AUDIENCES=
 ```
 
 `secrets.env` (no quotes around values; kustomize keeps them literally):
@@ -66,7 +71,8 @@ CORS_ALLOWED_ORIGINS=
 # The password must match postgres.env. Use one without URL special characters (hex is safe).
 DATABASE_URL=ecto://meridian:PASSWORD@meridian-postgres/meridian
 SECRET_KEY_BASE=   # openssl rand -base64 48
-ADMIN_TOKEN=       # openssl rand -base64 48; leave empty to disable /admin
+ADMIN_TOKEN=       # openssl rand -base64 48; leave empty to use only sign-in (or disable /admin)
+ADMIN_OIDC_CLIENT_SECRET=   # only for a confidential admin client
 LLM_API_KEY=
 ```
 

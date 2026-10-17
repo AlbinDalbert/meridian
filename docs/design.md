@@ -176,19 +176,30 @@ not a chat client.
 
 ### Admin authentication
 
-Admin access belongs to the **operator of the deployment**, not to a Meridian user, so it uses a
-separate credential:
+Admin access belongs to the **operator of the deployment**, not to a Meridian user, so it uses
+its own credentials. Either or both of these can be enabled; with neither, `/admin` is disabled
+entirely.
 
-- `ADMIN_TOKEN`: a long random secret provided by the deployment (e.g. a Kubernetes Secret,
-  generated with `openssl rand -base64 48`). If it is unset, `/admin` is disabled entirely.
-- Login form: paste the token → constant-time compare → a signed, short-lived session cookie
-  scoped to `/admin`. Cookie sessions exist only in the admin pipeline; the APIs stay
-  API-key-only.
-- Rotating the secret and restarting invalidates admin access (sessions also carry a hash of
-  the token, so old cookies stop working once the token changes).
+- **Sign-in with the OIDC provider** (`OIDC_ISSUER`, `ADMIN_OIDC_CLIENT_ID`, optional
+  `ADMIN_OIDC_CLIENT_SECRET`, `ADMIN_EMAILS`): authorization code flow with PKCE, `state`, and
+  `nonce`. The ID token is verified (signature, issuer, audience, nonce); the operator gets in if
+  the verified email is in `ADMIN_EMAILS`. The session stores the email, so removing it from
+  `ADMIN_EMAILS` logs them out. Being able to sign in to the provider is not enough: the
+  allowlist is what makes someone an operator.
+- **`ADMIN_TOKEN`**: a long random secret provided by the deployment (e.g. a Kubernetes Secret,
+  generated with `openssl rand -base64 48`), pasted into the login form and compared in constant
+  time. Useful as a fallback when the provider is down. Sessions carry a hash of the token, so
+  rotating it logs everyone out.
+
+Either way the result is a signed, short-lived (12 h) session cookie scoped to `/admin`. Cookie
+sessions exist only in the admin pipeline; the APIs stay bearer-only. The session cookie is
+`SameSite=Strict`, which isn't sent on the provider's redirect back to the callback, so the
+in-flight login (`state`, `nonce`, PKCE verifier) lives in its own short-lived, encrypted,
+`SameSite=Lax` cookie, and the callback moves into the console with a same-site navigation (a
+meta refresh) rather than a redirect.
 
 This also solves bootstrapping: the operator creates the first user and API key from the admin
-UI, so no special bootstrap command is needed. OIDC can replace or supplement the token later.
+UI, so no special bootstrap command is needed.
 
 ## Runs: the durable execution model
 
@@ -412,13 +423,28 @@ permissions and see everything. Remote extensions see only what their hook subsc
 
 ## Identity: users, API keys, policies
 
-- **Users** are generic: id, display name, optional email. There is no signup and no user
-  login. Users are created by the operator in the [admin UI](#admin-ui).
+- **Users** are generic: id, display name, optional email. There is no signup. Users are
+  created by the operator in the [admin UI](#admin-ui).
 - **API keys** identify a user to clients, one per client/purpose. Minted in the admin UI (and
   later self-service via `/api/keys`). Format `mrd_<random>`, shown once, stored as a SHA-256
   hash with a short visible prefix.
-- Two credential types, never mixed: **API keys** (users → APIs) and the **admin token**
-  (operator → `/admin`).
+- **OIDC access tokens** (optional, `OIDC_AUDIENCES`) identify a user to first-party clients
+  that let people sign in. Meridian is only a *resource server*: the client runs the login with
+  the provider and sends the access token as `Authorization: Bearer`, exactly where an API key
+  would go. Meridian verifies it (RS256 against the provider's JWKS; issuer; audience is one of
+  `OIDC_AUDIENCES`; expiry) and looks up the user by `(oidc_issuer, oidc_subject)`. A subject
+  seen for the first time is linked to the user whose email matches the provider's userinfo
+  (unless marked unverified); a user already linked to another identity is never relinked, and
+  without a matching user the request is refused. The operator can unlink in the admin UI.
+  Signed-in users get the default policy (all their personas). Run events tokens are tied to
+  the user instead of a key. Access tokens aren't checked for revocation; they are short-lived.
+- **Client contract.** Whatever the credential, a client sends one bearer token and gets a
+  user. Meridian knows nothing about specific clients or how they got their token, so any
+  number of clients can share it. Generic OpenAI clients use API keys; apps with a sign-in
+  button use the provider.
+- Credentials are never mixed between roles: **API keys** and **OIDC access tokens**
+  (users → APIs), and **admin sign-in** or the **admin token** (operator → `/admin`). Signing
+  in to a client never grants admin access.
 - Each key carries a **policy**:
 
 ```jsonc
@@ -511,7 +537,11 @@ is in the repo.
 | `LLM_API_KEY`          | Upstream key (optional) |
 | `EXPOSE_UPSTREAM_MODELS` | Also list raw upstream models in `/v1/models` (default `false`) |
 | `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call `/v1` and `/api` (comma-separated, or `*`). Unset = none |
-| `ADMIN_TOKEN`          | Enables `/admin`; the secret used to log in. Unset = admin disabled |
+| `ADMIN_TOKEN`          | Enables `/admin`; the secret used to log in. Unset (and no admin sign-in) = admin disabled |
+| `OIDC_ISSUER`          | OIDC provider for sign-in (admin and clients), exactly as its tokens' `iss` |
+| `ADMIN_OIDC_CLIENT_ID`, `ADMIN_OIDC_CLIENT_SECRET` | Admin sign-in client (the secret only for confidential clients) |
+| `ADMIN_EMAILS`         | Emails allowed into `/admin` via sign-in (comma-separated) |
+| `OIDC_AUDIENCES`       | Client ids whose access tokens `/v1` and `/api` accept. Unset = API keys only |
 | `EXTENSIONS_DIR`       | Optional directory of `.ex` extensions compiled at boot (if we do that) |
 
 Extensions declare and read their own config.
@@ -593,7 +623,6 @@ extension-owned tables; the real stress test of the extension API.
 - Phoenix Channels transport (WebSocket), and the thread-level SSE stream
 - `EXTENSIONS_DIR` runtime loading, remote extensions, maybe WASM
 - Responses API surface
-- OIDC login for admin (and maybe users)
 - Scheduled runs
 
 ## Decision log
@@ -614,6 +643,9 @@ Add an entry whenever a decision is made or reversed.
 | **SSE + Phoenix Channels over one event log** | SSE only; WebSocket only | SSE for simple clients/curl, Channels for rich bidirectional clients. Neither has special semantics. |
 | **Admin UI is LiveView in the same release** | Separate SPA (e.g. TS) | One deployable, no extra API client or CORS. The live run view subscribes to the same PubSub topics as clients. No Node toolchain: the LiveView JS can be served from the dependency. |
 | **Admin auth via deployment secret `ADMIN_TOKEN`** | Admin scope on user API keys, user passwords | Operating the instance and using it are different roles with different credentials. Also removes the need for a bootstrap command. |
+| **OIDC sign-in for admin, with an `ADMIN_EMAILS` allowlist; `ADMIN_TOKEN` stays as an optional fallback** | WorkOS-specific integration (its User Management API or SDK); a proxy in front (oauth2-proxy, Cloudflare Access); token only | No long secret to keep and paste. Generic OIDC works with WorkOS AuthKit and any other provider, so deployments pick their own. The allowlist is needed because a provider only says who someone is, not that they operate this instance. Hand-rolled with Req and `:crypto` (RS256 only) instead of a JOSE dependency. |
+| **Clients may authenticate with OIDC access tokens; Meridian is a resource server, not an authorization server** | Meridian running the login and minting its own tokens or API keys per client; cookie sessions for `/api` | Keeps one client contract (a bearer token) and keeps Meridian ignorant of clients. Clients use the provider's SDKs; Meridian only verifies. No cookies keeps the CORS reasoning intact. API keys stay for generic clients. |
+| **Sign-ins link to existing users by verified email; no signup** | Auto-creating users on first sign-in; the operator entering provider subject ids | Users stay operator-created. Email is what the operator already knows; the subject is stored on first sign-in so later changes to the email don't move the account. Never relinking a linked user stops a new identity with the same email from taking over. |
 | **Generic and environment-agnostic** | Assuming a specific inference server or cluster | Public project. Everything deployment-specific comes from env vars; deployment values live in the operator's own infrastructure repo. |
 | **Persona resolution on `/v1`**: `meridian/<slug>` → that persona (404 if unknown or not allowed); a raw upstream id → passthrough when `EXPOSE_UPSTREAM_MODELS`; anything else → the key's `default_persona`, else the user's default persona | Rejecting unknown models; falling back for unknown `meridian/` slugs too | Clients with a hardcoded model name (`gpt-4o`) still work, but a typo in an explicit persona id fails loudly instead of silently using the wrong persona. |
 | **Persona system prompt goes first, merged into the client's leading system/developer message** | A separate extra system message; appending after the client's | Some chat templates reject more than one system message or one that isn't first. The persona's identity comes before the client's (e.g. a coding agent's) instructions. |

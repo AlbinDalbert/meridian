@@ -6,7 +6,12 @@ defmodule MeridianWeb.Api.MessageJSON do
     %{data: Enum.map(messages, &Message.to_map/1), has_more: has_more}
   end
 
-  def create(%{message: message, run: run, current_api_key: api_key}) do
-    %{data: %{message: Message.to_map(message), run: RunJSON.data(run, api_key)}}
+  def create(%{message: message, run: run} = assigns) do
+    %{
+      data: %{
+        message: Message.to_map(message),
+        run: RunJSON.data(run, RunJSON.credential(assigns))
+      }
+    }
   end
 end

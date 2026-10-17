@@ -12,9 +12,9 @@ defmodule MeridianWeb.Api.ThreadController do
   end
 
   def create(conn, _params) do
-    %{current_user: user, current_api_key: api_key} = conn.assigns
+    %{current_user: user, current_policy: policy} = conn.assigns
 
-    with {:ok, thread} <- Threads.create_thread(user, api_key.policy, conn.body_params) do
+    with {:ok, thread} <- Threads.create_thread(user, policy, conn.body_params) do
       conn
       |> put_status(:created)
       |> render(:show, thread: thread)
@@ -28,10 +28,10 @@ defmodule MeridianWeb.Api.ThreadController do
   end
 
   def update(conn, %{"id" => id}) do
-    %{current_user: user, current_api_key: api_key} = conn.assigns
+    %{current_user: user, current_policy: policy} = conn.assigns
 
     with %{} = thread <- Threads.get_user_thread(user, id),
-         {:ok, thread} <- Threads.update_thread(thread, api_key.policy, conn.body_params) do
+         {:ok, thread} <- Threads.update_thread(thread, policy, conn.body_params) do
       render(conn, :show, thread: thread, active_run: Runs.get_active_run(thread))
     end
   end

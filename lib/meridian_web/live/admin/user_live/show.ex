@@ -45,6 +45,18 @@ defmodule MeridianWeb.Admin.UserLive.Show do
         </:actions>
       </.header>
 
+      <p :if={@user.oidc_subject} class="muted">
+        Signs in through the OIDC provider as <code>{@user.oidc_subject}</code>.
+        <button
+          type="button"
+          class="link danger"
+          phx-click="unlink_sign_in"
+          data-confirm={"Unlink #{@user.name}'s sign-in? Their next sign-in links again by email."}
+        >
+          Unlink
+        </button>
+      </p>
+
       <.header level={2}>
         Personas
         <:subtitle>Clients pick a persona by using its model id.</:subtitle>
@@ -155,6 +167,11 @@ defmodule MeridianWeb.Admin.UserLive.Show do
      socket
      |> put_flash(:info, "User deleted.")
      |> push_navigate(to: ~p"/admin/users")}
+  end
+
+  def handle_event("unlink_sign_in", _params, socket) do
+    {:ok, user} = Accounts.unlink_oidc_identity(socket.assigns.user)
+    {:noreply, socket |> assign(user: user) |> put_flash(:info, "Sign-in unlinked.")}
   end
 
   def handle_event("make_default", %{"id" => id}, socket) do

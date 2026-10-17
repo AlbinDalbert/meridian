@@ -13,6 +13,7 @@ defmodule Meridian.Application do
       {DNSCluster, query: Application.get_env(:meridian, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Meridian.PubSub},
       Meridian.Upstream.ModelCache,
+      Meridian.OIDC.Cache,
       # Extension hook handlers run here. Before the run supervisor, so it outlives the runs on
       # shutdown (an interrupted run still fires run_end).
       {Task.Supervisor, name: Meridian.Extensions.TaskSupervisor},

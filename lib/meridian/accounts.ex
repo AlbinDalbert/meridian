@@ -1,10 +1,11 @@
 defmodule Meridian.Accounts do
   @moduledoc """
-  Users and their API keys.
+  Users and how clients identify them: API keys, or access tokens from the OIDC provider.
   """
   import Ecto.Query
 
   alias Meridian.Accounts.{ApiKey, User}
+  alias Meridian.OIDC
   alias Meridian.Personas
   alias Meridian.Repo
 
@@ -18,6 +19,8 @@ defmodule Meridian.Accounts do
   end
 
   def get_user!(id), do: Repo.get!(User, id)
+
+  def get_user(id), do: Repo.get(User, id)
 
   def change_user(%User{} = user, attrs \\ %{}), do: User.changeset(user, attrs)
 
@@ -127,6 +130,66 @@ defmodule Meridian.Accounts do
   @doc "Gets an active (not revoked) API key by id, with its user preloaded."
   def get_active_api_key(id) do
     Repo.one(from k in ApiKey, where: k.id == ^id and is_nil(k.revoked_at), preload: :user)
+  end
+
+  ## OIDC access tokens
+
+  @doc """
+  Authenticates an access token a client got from the OIDC provider (see `Meridian.OIDC`).
+
+  Returns the user whose linked identity is the token's issuer and subject. The first time a
+  subject is seen, it is linked to the user with the same email, as reported by the provider's
+  userinfo endpoint (and not marked unverified). There is no signup: without a matching user,
+  this returns `{:error, :unknown_user}`. A user already linked to another identity is never
+  relinked.
+  """
+  @spec authenticate_access_token(String.t()) ::
+          {:ok, User.t()} | {:error, :unknown_user | :provider_unavailable | atom()}
+  def authenticate_access_token(token) when is_binary(token) do
+    with {:ok, %{"iss" => issuer, "sub" => subject}} <-
+           OIDC.verify_token(token, OIDC.audiences()) do
+      case Repo.get_by(User, oidc_issuer: issuer, oidc_subject: subject) do
+        %User{} = user -> {:ok, user}
+        nil -> link_by_email(token, issuer, subject)
+      end
+    end
+  end
+
+  defp link_by_email(token, issuer, subject) do
+    with {:ok, %{"sub" => ^subject, "email" => email} = info} when is_binary(email) <-
+           OIDC.userinfo(token),
+         true <- info["email_verified"] != false,
+         %User{oidc_subject: nil} = user <- get_user_by_email(email) do
+      user
+      |> Ecto.Changeset.change(oidc_issuer: issuer, oidc_subject: subject)
+      |> Ecto.Changeset.unique_constraint([:oidc_issuer, :oidc_subject])
+      |> Repo.update()
+      |> case do
+        {:ok, user} -> {:ok, user}
+        # A concurrent request linked it first.
+        {:error, _changeset} -> fetch_linked_user(issuer, subject)
+      end
+    else
+      {:error, :provider_unavailable} -> {:error, :provider_unavailable}
+      _ -> {:error, :unknown_user}
+    end
+  end
+
+  defp fetch_linked_user(issuer, subject) do
+    case Repo.get_by(User, oidc_issuer: issuer, oidc_subject: subject) do
+      %User{} = user -> {:ok, user}
+      nil -> {:error, :unknown_user}
+    end
+  end
+
+  defp get_user_by_email(email) do
+    email = String.downcase(String.trim(email))
+    Repo.one(from u in User, where: fragment("lower(?)", u.email) == ^email)
+  end
+
+  @doc "Removes a user's linked sign-in identity, so their next sign-in links again by email."
+  def unlink_oidc_identity(%User{} = user) do
+    user |> Ecto.Changeset.change(oidc_issuer: nil, oidc_subject: nil) |> Repo.update()
   end
 
   defp touch_last_used(%ApiKey{} = api_key) do

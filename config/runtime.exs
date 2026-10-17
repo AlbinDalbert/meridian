@@ -70,6 +70,48 @@ if config_env() != :test do
 
   config :meridian, :admin_token, admin_token
 
+  # OIDC (e.g. WorkOS AuthKit): sign-in for /admin and for clients. See README "Signing in".
+  env_list = fn name ->
+    System.get_env(name, "")
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  env = fn name ->
+    case System.get_env(name) do
+      value when value in [nil, ""] -> nil
+      value -> String.trim(value)
+    end
+  end
+
+  oidc_issuer = env.("OIDC_ISSUER")
+  oidc_audiences = env_list.("OIDC_AUDIENCES")
+  admin_oidc_client_id = env.("ADMIN_OIDC_CLIENT_ID")
+  admin_emails = "ADMIN_EMAILS" |> env_list.() |> Enum.map(&String.downcase/1)
+
+  cond do
+    is_nil(oidc_issuer) and (oidc_audiences != [] or admin_oidc_client_id) ->
+      raise "OIDC_AUDIENCES and ADMIN_OIDC_CLIENT_ID need OIDC_ISSUER to be set."
+
+    admin_oidc_client_id && admin_emails == [] ->
+      raise "ADMIN_OIDC_CLIENT_ID is set but ADMIN_EMAILS is empty, so nobody could sign in."
+
+    true ->
+      :ok
+  end
+
+  config :meridian, Meridian.OIDC, issuer: oidc_issuer, audiences: oidc_audiences
+
+  config :meridian,
+         :admin_oidc,
+         admin_oidc_client_id &&
+           [
+             client_id: admin_oidc_client_id,
+             client_secret: env.("ADMIN_OIDC_CLIENT_SECRET"),
+             emails: admin_emails
+           ]
+
   # Browser apps allowed to call /v1 and /api: comma-separated origins, or "*".
   cors_allowed_origins =
     case System.get_env("CORS_ALLOWED_ORIGINS", "") |> String.trim() do
