@@ -7,6 +7,11 @@ defmodule MeridianWeb.Endpoint do
     websocket: [connect_info: [session: MeridianWeb.AdminAuth.session_options()]],
     longpoll: false
 
+  # The LiveView socket for /me, likewise under /me for its session cookie.
+  socket "/me/live", Phoenix.LiveView.Socket,
+    websocket: [connect_info: [session: MeridianWeb.MeAuth.session_options()]],
+    longpoll: false
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),

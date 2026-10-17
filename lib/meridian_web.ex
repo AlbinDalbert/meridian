@@ -9,8 +9,8 @@ defmodule MeridianWeb do
       use MeridianWeb, :live_view
       use MeridianWeb, :html
 
-  HTML is only used by the operator console under `/admin`; the client-facing
-  surfaces (`/v1`, `/api`) are JSON.
+  HTML is only used by the operator console under `/admin` and the user area under `/me`; the
+  client-facing surfaces (`/v1`, `/api`) are JSON.
 
   The definitions below will be executed for every controller,
   component, etc, so keep them short and clean, focused
@@ -53,6 +53,14 @@ defmodule MeridianWeb do
   def live_view do
     quote do
       use Phoenix.LiveView
+
+      unquote(html_helpers())
+    end
+  end
+
+  def live_component do
+    quote do
+      use Phoenix.LiveComponent
 
       unquote(html_helpers())
     end

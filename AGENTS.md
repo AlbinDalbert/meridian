@@ -1,6 +1,7 @@
 This is Meridian, a Phoenix application whose client-facing surfaces (`/v1`, `/api`) are JSON
-APIs. The only HTML is the operator console under `/admin` (LiveView, no asset build: plain CSS
-and JS in `priv/static/assets/`, Phoenix/LiveView JS served from the deps).
+APIs. The only HTML is the operator console under `/admin` and the user area under `/me`, where
+users manage their own personas (LiveView, no asset build: plain CSS and JS in
+`priv/static/assets/`, Phoenix/LiveView JS served from the deps).
 Read `docs/design.md` before making architectural changes.
 
 ## Project guidelines

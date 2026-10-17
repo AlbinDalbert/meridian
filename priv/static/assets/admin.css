@@ -1,4 +1,4 @@
-/* Admin console styles. Deliberately small; no framework, no build step. */
+/* Styles for the admin console and /me. Deliberately small; no framework, no build step. */
 
 :root {
   --bg: #f7f7f5;
@@ -53,6 +53,8 @@ code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size:
 .topbar a { text-decoration: none; }
 .topbar .brand { font-weight: 600; color: var(--text); }
 .topbar .logout { margin-left: auto; }
+.topbar .topbar-user { margin-left: auto; }
+.topbar .topbar-user + .logout { margin-left: 0; }
 
 main { max-width: 960px; margin: 0 auto; padding: 2rem; }
 

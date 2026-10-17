@@ -3,7 +3,9 @@ defmodule MeridianWeb.Api.AuthController do
   `/api/auth`: signing users of browser apps in with the OIDC provider (see
   `MeridianWeb.UserAuth`).
 
-    * `GET /api/auth/session` says whether sign-in is available and who is signed in.
+    * `GET /api/auth/session` says whether sign-in is available and who is signed in, and
+      where people manage their own things (`account_url`, Meridian's `/me` at its public URL),
+      for apps to link to.
     * `GET /api/auth/login?return_to=/path` sends the browser to the provider. The provider
       sends it back to `GET /api/auth/callback`, which starts the session and redirects to
       `return_to` (a path on the app's origin). With `prompt=login`, the provider asks the
@@ -32,6 +34,7 @@ defmodule MeridianWeb.Api.AuthController do
     json(conn, %{
       data: %{
         sign_in: UserAuth.enabled?(),
+        account_url: MeridianWeb.Endpoint.url() <> "/me",
         user: user && %{id: user.id, name: user.name, email: user.email}
       }
     })

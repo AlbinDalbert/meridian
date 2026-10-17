@@ -2,6 +2,7 @@ defmodule MeridianWeb.Router do
   use MeridianWeb, :router
 
   import MeridianWeb.AdminAuth, only: [require_admin_enabled: 2, require_admin: 2]
+  import MeridianWeb.MeAuth, only: [require_me_enabled: 2, require_user: 2]
 
   # The native API. Authenticated like /v1; errors use the same shape.
   pipeline :api do
@@ -21,6 +22,12 @@ defmodule MeridianWeb.Router do
     plug MeridianWeb.Plugs.ApiKeyAuth
   end
 
+  @browser_headers %{
+    "content-security-policy" =>
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " <>
+        "img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+  }
+
   # The admin console's cookie session. The APIs' own sign-in session is separate (see
   # MeridianWeb.UserAuth).
   pipeline :admin do
@@ -32,11 +39,20 @@ defmodule MeridianWeb.Router do
     plug :put_root_layout, html: {MeridianWeb.Layouts, :root}
     plug :protect_from_forgery
 
-    plug :put_secure_browser_headers, %{
-      "content-security-policy" =>
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " <>
-          "img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
-    }
+    plug :put_secure_browser_headers, @browser_headers
+  end
+
+  # Where users manage their own things (see MeridianWeb.MeAuth). Its own session, separate
+  # from the admin console's.
+  pipeline :me do
+    plug :require_me_enabled
+    plug :accepts, ["html"]
+    plug Plug.Session, MeridianWeb.MeAuth.session_options()
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {MeridianWeb.Layouts, :me_root}
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers, @browser_headers
   end
 
   scope "/v1", MeridianWeb.V1 do
@@ -99,6 +115,25 @@ defmodule MeridianWeb.Router do
       live "/threads/:id", ThreadLive.Show, :show
       live "/runs", RunLive.Index, :index
       live "/runs/:id", RunLive.Show, :show
+    end
+  end
+
+  scope "/me", MeridianWeb.Me do
+    pipe_through :me
+
+    get "/login", SessionController, :new
+    post "/logout", SessionController, :delete
+    get "/auth/oidc", SessionController, :oidc
+    get "/auth/callback", SessionController, :callback
+  end
+
+  scope "/me", MeridianWeb.Me do
+    pipe_through [:me, :require_user]
+
+    live_session :me, on_mount: {MeridianWeb.MeAuth, :require_user} do
+      live "/", PersonaLive.Index, :index
+      live "/personas/new", PersonaLive.Form, :new
+      live "/personas/:id/edit", PersonaLive.Form, :edit
     end
   end
 end

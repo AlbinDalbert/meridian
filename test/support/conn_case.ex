@@ -68,4 +68,46 @@ defmodule MeridianWeb.ConnCase do
     # Recycling carries the session cookie over to the next request.
     %{conn: Phoenix.ConnTest.recycle(conn)}
   end
+
+  @doc """
+  Signs `user` in to `/me` through the stubbed OIDC provider (`Meridian.OIDCStub`), linking
+  them on a first sign-in, and returns the recycled conn. Needs `put_oidc_client/2` first.
+  """
+  def log_in_me(conn, user, subject \\ "user_#{System.unique_integer([:positive])}") do
+    alias Meridian.OIDCStub
+
+    OIDCStub.stub()
+    conn = Phoenix.ConnTest.dispatch(conn, MeridianWeb.Endpoint, :get, "/me/auth/oidc")
+    "https://auth.test/oauth2/authorize?" <> query = Phoenix.ConnTest.redirected_to(conn, 302)
+    query = URI.decode_query(query)
+    client_id = Meridian.OIDC.client()[:client_id]
+
+    OIDCStub.stub(
+      token: fn _params ->
+        claims = %{
+          "sub" => subject,
+          "email" => user.email,
+          "aud" => client_id,
+          "nonce" => query["nonce"]
+        }
+
+        %{
+          "id_token" => OIDCStub.sign(claims),
+          "access_token" => "opaque",
+          "token_type" => "Bearer"
+        }
+      end
+    )
+
+    conn =
+      conn
+      |> Phoenix.ConnTest.recycle()
+      |> Phoenix.ConnTest.dispatch(MeridianWeb.Endpoint, :get, "/me/auth/callback", %{
+        "code" => "c",
+        "state" => query["state"]
+      })
+
+    "/me" = Phoenix.ConnTest.redirected_to(conn)
+    Phoenix.ConnTest.recycle(conn)
+  end
 end

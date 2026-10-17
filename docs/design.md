@@ -201,6 +201,28 @@ meta refresh) rather than a redirect.
 This also solves bootstrapping: the operator creates the first user and API key from the admin
 UI, so no special bootstrap command is needed.
 
+## User area (`/me`)
+
+Where users manage their own things, starting with their personas: create, edit (system prompt,
+upstream model, default params, extensions and their settings), make default, delete. It is a
+separate LiveView area next to `/admin`, not a restricted admin console, and uses the same
+persona form (`MeridianWeb.PersonaFormComponent`). Any model the upstream offers can be picked,
+as in the admin console. Users can't create other users or see anyone else's things; there is
+still no signup.
+
+- **Sign-in** is the OIDC provider only, on whenever user sign-in is (`OIDC_CLIENT_ID`); without
+  it, `/me` is 404. The flow is the admin one (code + PKCE, `state`, `nonce`, flow cookie), with
+  the redirect URI `/me/auth/callback`, and links the person to their user exactly like the other
+  sign-ins (by verified email on a first sign-in; no user, no entry).
+- **The session** is its own signed cookie, scoped to `/me` (14 days, `SameSite=Lax`), holding
+  the user id and linked identity, so deleting the user or unlinking ends it. It is separate
+  from the admin session and the `/api` sign-in cookie: `ADMIN_EMAILS` means nothing here, and a
+  `/me` session never opens `/admin`. `/me` has its own LiveView socket (`/me/live`) for the
+  same reason `/admin` does.
+- Personas are loaded through `Personas.get_persona!(user, id)`, so another user's id is a 404.
+- Browser apps find it as `account_url` in `GET /api/auth/session`.
+- *Later:* self-service API keys, browsing your own threads.
+
 ## Runs: the durable execution model
 
 A **run** is one agent turn: from a user message to a final assistant message, including any
@@ -454,8 +476,9 @@ permissions and see everything. Remote extensions see only what their hook subsc
   number of clients can share it. Generic OpenAI clients use API keys; apps with a sign-in
   button use the provider.
 - Credentials are never mixed between roles: **API keys** and **OIDC access tokens**
-  (users → APIs), and **admin sign-in** or the **admin token** (operator → `/admin`). Signing
-  in to a client never grants admin access.
+  (users → APIs), **`/me` sign-in** (users → their own `/me`), and **admin sign-in** or the
+  **admin token** (operator → `/admin`). Signing in to a client or to `/me` never grants admin
+  access.
 - Each key carries a **policy**:
 
 ```jsonc
@@ -550,7 +573,7 @@ is in the repo.
 | `CORS_ALLOWED_ORIGINS` | Browser origins allowed to call `/v1` and `/api` (comma-separated, or `*`). Unset = none |
 | `ADMIN_TOKEN`          | Enables `/admin`; the secret used to log in. Unset (and no admin sign-in) = admin disabled |
 | `OIDC_ISSUER`          | OIDC provider for sign-in (admin and clients), exactly as its tokens' `iss` |
-| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | Meridian's client at the provider, for admin and user sign-in (the secret only for confidential clients) |
+| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | Meridian's client at the provider, for admin and user sign-in (the secret only for confidential clients). Also turns on `/me` |
 | `ADMIN_EMAILS`         | Emails allowed into `/admin` via sign-in (comma-separated); unset = admin sign-in off |
 | `OIDC_AUDIENCES`       | Client ids whose access tokens `/v1` and `/api` accept. Unset = API keys only |
 | `EXTENSIONS_DIR`       | Optional directory of `.ex` extensions compiled at boot (if we do that) |
@@ -696,6 +719,9 @@ Add an entry whenever a decision is made or reversed.
 | **Slice 3 is proven by two tiny extensions (`datetime`, `title`); memory gets its own slice; Channels are dropped for now** | Title generation alone; memory in slice 3; Channels in slice 3 | Titles alone only exercise `run_end`. Memory's design (e.g. shared across personas or not) is a memory question, not an API one. No client needs WebSockets yet. |
 | **Kubernetes manifests are kustomize bases** (`deploy/app`, `deploy/postgres`) that overlays reference by URL; configuration comes from generated ConfigMaps/Secrets | A Helm chart; manifests only in the operator's repo; building images on a cluster node | Plain YAML with no templating to learn, and overlays keep every deployment-specific value out of this public repo. Generated names roll the Deployment when config changes. CI already builds multi-arch images in about two minutes, so nodes only ever pull. |
 | **Health probes are exempt from `force_ssl`** | Probing over HTTPS; a separate probe port | kubelet calls the pod over plain HTTP and counts a redirect to another host as success, so `/readyz` would pass with the database down. |
+| **Users manage their own personas in `/me`, a LiveView area separate from `/admin`** | User roles inside `/admin`; only a JSON API for clients (e.g. xebec) to build on | Keeps operating and using Meridian as different roles with different sessions: a bug in `/me` can't open `/admin`. Lives in the release (no client needed, no asset build) and reuses the admin persona form and the sign-in Meridian already runs. A JSON API for personas can come later on the same user-scoped domain functions. |
+| **`/me` signs in with the OIDC provider only, into its own `SameSite=Lax` cookie** | Reusing the `/api` sign-in cookie; `SameSite=Strict` with a meta-refresh callback like `/admin` | The `/api` cookie is scoped to `/api` and checked differently (`X-Requested-With`); LiveView needs a real session. Lax keeps people signed in when they follow a link to `/me` from an app; forms and the LiveView socket carry CSRF tokens, and the callback can simply redirect. |
+| **Users may pick any upstream model in `/me`** | An operator-defined allowlist of models | Nobody needs a limit yet; it can be added when someone does. |
 
 ## Open questions
 

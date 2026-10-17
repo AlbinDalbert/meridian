@@ -200,9 +200,5 @@ defmodule MeridianWeb.Admin.UserLive.Show do
     {:noreply, socket |> put_flash(:info, "API key revoked.") |> load_children()}
   end
 
-  defp user_persona!(id, socket) do
-    persona = Personas.get_persona!(id)
-    true = persona.user_id == socket.assigns.user.id
-    persona
-  end
+  defp user_persona!(id, socket), do: Personas.get_persona!(socket.assigns.user, id)
 end

@@ -23,6 +23,9 @@ defmodule Meridian.Personas do
 
   def get_persona!(id), do: Repo.get!(Persona, id)
 
+  @doc "Gets persona `id` if it belongs to `user`; raises `Ecto.NoResultsError` otherwise."
+  def get_persona!(%User{id: user_id}, id), do: Repo.get_by!(Persona, id: id, user_id: user_id)
+
   def get_persona_by_slug(%User{id: user_id}, slug) do
     Repo.get_by(Persona, user_id: user_id, slug: slug)
   end

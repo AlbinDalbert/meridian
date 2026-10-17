@@ -77,12 +77,18 @@ Instead of tokens and keys, operators and users can sign in through any OpenID C
 provider: [WorkOS AuthKit](https://workos.com/docs/authkit), Keycloak, Authentik, Google, Entra.
 Meridian signs people in with one client at the provider: set `OIDC_ISSUER`, `OIDC_CLIENT_ID`,
 and `OIDC_CLIENT_SECRET` (for a confidential client; omit it for a public one, Meridian always
-uses PKCE). Register both redirect URIs below with that client.
+uses PKCE). Register the redirect URIs below with that client.
 
 **Admin console.** Also set `ADMIN_EMAILS`. `/admin/login` then shows a "Sign in" button; you
 get in if the provider says your email is verified and it's in `ADMIN_EMAILS`. Redirect URI:
 `https://<PHX_HOST>/admin/auth/callback`. `ADMIN_TOKEN` can stay set as a fallback for when the
 provider is down, or be left unset.
+
+**Your own personas (`/me`).** On whenever the client is set. Any Meridian user can sign in at
+`https://<PHX_HOST>/me` and create, edit, and delete their own personas (system prompt, model,
+params, extensions) and pick their default. It has nothing to do with the admin console: its
+own session, no `ADMIN_EMAILS`, and only your own things. Users are linked by email as below.
+Redirect URI: `https://<PHX_HOST>/me/auth/callback`.
 
 **Browser apps** (e.g. [xebec](../xebec)). On whenever the client is set. Meridian runs the
 login for the app, like it does for `/admin`: the app links its "Sign in" button to
@@ -91,7 +97,8 @@ login for the app, like it does for `/admin`: the app links its "Sign in" button
 token. The app must be served on the same origin as `/api` (a reverse proxy routing `/api` to
 Meridian, as xebec's image does), and requests that change something must send an
 `X-Requested-With` header. `GET /api/auth/session` says whether sign-in is available and who is
-signed in; `POST /api/auth/logout` ends the session. Meridian's session only: the provider
+signed in, plus `account_url` (`/me` at Meridian's public URL, for apps to link to);
+`POST /api/auth/logout` ends the session. Meridian's session only: the provider
 keeps its own, so after logging out send `prompt=login` with the next `/api/auth/login` to have
 the provider ask again (and let the person pick another account). Users are linked by email as below.
 Redirect URI: `https://<app host>/api/auth/callback`; behind a proxy, Meridian builds it
@@ -115,8 +122,8 @@ With WorkOS:
 1. In the WorkOS dashboard, under AuthKit, note your AuthKit domain. That is `OIDC_ISSUER`,
    e.g. `https://your-name.authkit.app`.
 2. Under Connect, create an OAuth application for Meridian: first-party, confidential, with the
-   redirect URIs `https://<PHX_HOST>/admin/auth/callback` and
-   `https://<app host>/api/auth/callback` for each browser app. Its client id and secret are
+   redirect URIs `https://<PHX_HOST>/admin/auth/callback`, `https://<PHX_HOST>/me/auth/callback`,
+   and `https://<app host>/api/auth/callback` for each browser app. Its client id and secret are
    `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
 3. For clients that run the login themselves, create a first-party application each (public,
    with the client's own redirect URI) and add its client id to `OIDC_AUDIENCES`.

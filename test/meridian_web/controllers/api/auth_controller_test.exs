@@ -51,8 +51,10 @@ defmodule MeridianWeb.Api.AuthControllerTest do
   defp signed_in(conn), do: conn |> recycle() |> put_req_header("x-requested-with", "test")
 
   test "session says sign-in is available, and nobody is signed in", %{conn: conn} do
-    assert %{"data" => %{"sign_in" => true, "user" => nil}} =
+    assert %{"data" => %{"sign_in" => true, "user" => nil, "account_url" => account_url}} =
              conn |> get(~p"/api/auth/session") |> json_response(200)
+
+    assert account_url == MeridianWeb.Endpoint.url() <> "/me"
 
     put_oidc_client(nil)
 
