@@ -76,8 +76,13 @@ defmodule Meridian.ExtensionsTest do
     :telemetry.attach(
       handler,
       [:meridian, :extensions, :hook],
-      fn _event, _measurements, %{extension_id: ^id} = meta, _config ->
-        send(test_pid, {:hook, meta.hook, meta.result})
+      fn
+        _event, _measurements, %{extension_id: ^id} = meta, _config ->
+          send(test_pid, {:hook, meta.hook, meta.result})
+
+        # Other tests' extensions, running at the same time.
+        _event, _measurements, _meta, _config ->
+          :ok
       end,
       nil
     )

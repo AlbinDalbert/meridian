@@ -1,7 +1,7 @@
 defmodule MeridianWeb.ExtensionComponents do
   @moduledoc """
   Pieces of the extension pages shared by the admin console and `/me`: a script's latest
-  error, a read-only view of a script, and the reference for writing one.
+  error, its tools, a read-only view of a script, and the reference for writing one.
   """
   use Phoenix.Component
 
@@ -19,6 +19,23 @@ defmodule MeridianWeb.ExtensionComponents do
       </p>
       <pre>{@error.message}</pre>
       <p class="hint">Saving the script clears it.</p>
+    </section>
+    """
+  end
+
+  @doc "The tools a script offers the model (see `Meridian.Extensions.tools/1`)."
+  attr :tools, :map, required: true
+
+  def tools(assigns) do
+    ~H"""
+    <section :if={@tools != %{}} id="extension-tools" class="card">
+      <p><strong>Tools</strong></p>
+      <dl class="details">
+        <%= for {name, tool} <- Enum.sort(@tools) do %>
+          <dt><code>{name}</code></dt>
+          <dd>{tool.description}</dd>
+        <% end %>
+      </dl>
     </section>
     """
   end
@@ -57,6 +74,16 @@ defmodule MeridianWeb.ExtensionComponents do
           Functions <code>(args, ctx)</code> run in the background, queued with
           <code>meridian.jobs.enqueue</code>.
         </dd>
+        <dt><code>tools</code></dt>
+        <dd>
+          Functions the model can call, by name (letters, digits, <code>_</code>, <code>-</code>).
+          Each is a table: <code>description</code> (what the model is told),
+          <code>parameters</code> (a JSON Schema object, as a table or JSON text; none means no
+          arguments), and <code>run(args, ctx)</code>, which returns text or a table (sent as
+          JSON), or <code>nil, "error"</code>. The model sees them as
+          <code>extension__tool</code>. Errors, and calls over 30 seconds, become error results
+          the model can react to. An empty table is an object, so leave out empty lists.
+        </dd>
       </dl>
 
       <h3>Hooks</h3>
@@ -72,17 +99,39 @@ defmodule MeridianWeb.ExtensionComponents do
         <dd>A run started.</dd>
         <dt><code>before_run(config, ctx)</code></dt>
         <dd>
-          <code>config.system_prompt</code> (a list of sections) and <code>config.params</code>
-          (model params). <code>return false, "reason"</code> rejects the run.
+          <code>config.system_prompt</code> (a list of sections), <code>config.params</code>
+          (model params), and <code>config.tools</code> (the run's tools: <code>name</code>,
+          <code>description</code>, <code>parameters</code>; remove tools or change their
+          descriptions). <code>return false, "reason"</code> rejects the run.
         </dd>
         <dt><code>context(messages, ctx)</code></dt>
-        <dd>The conversation about to be sent, without the system prompt.</dd>
+        <dd>
+          The conversation about to be sent, without the system prompt. Called before every
+          model call of a run, so it sees earlier tool calls and results.
+        </dd>
         <dt><code>before_model_request(body, ctx)</code></dt>
-        <dd>The final request body.</dd>
+        <dd>The final request body, before every model call.</dd>
         <dt><code>message_end(content, ctx)</code></dt>
         <dd>
-          The reply's content parts (<code>{~s({type = "text", text = ...})}</code>) before it's
-          saved.
+          A reply's content parts (<code>{~s({type = "text", text = ...})}</code>) before it's
+          saved, including replies that call tools.
+        </dd>
+        <dt><code>tool_call(call, ctx)</code></dt>
+        <dd>
+          Before a tool runs: <code>id</code>, <code>name</code>, <code>arguments</code>. Return
+          the call with changed arguments, or <code>false, "reason"</code> to block it. If this
+          hook fails, the call is blocked.
+        </dd>
+        <dt><code>tool_result(result, ctx)</code></dt>
+        <dd>
+          A tool's result: <code>id</code>, <code>name</code>, <code>arguments</code>,
+          <code>content</code> (text), <code>status</code> (<code>ok</code> or
+          <code>error</code>). Return it with changed <code>content</code>.
+        </dd>
+        <dt><code>step_end(step, ctx)</code></dt>
+        <dd>
+          A model call and its tool calls are done: <code>index</code> (from 1),
+          <code>finish_reason</code>.
         </dd>
         <dt><code>run_end(run, ctx)</code></dt>
         <dd>

@@ -10,7 +10,12 @@ defmodule MeridianWeb.Admin.ExtensionLive.Form do
   end
 
   defp apply_action(socket, :new, _params) do
-    assign(socket, page_title: "New extension", extension: %Extension{}, last_error: nil)
+    assign(socket,
+      page_title: "New extension",
+      extension: %Extension{},
+      last_error: nil,
+      tools: %{}
+    )
   end
 
   # Admins can edit every extension, users' own included.
@@ -22,6 +27,7 @@ defmodule MeridianWeb.Admin.ExtensionLive.Form do
       page_title: extension.name,
       extension: extension,
       last_error: Extensions.last_error(extension),
+      tools: Extensions.tools(extension),
       personas: Map.get(Personas.count_by_extension(), extension.id, 0)
     )
   end
@@ -51,6 +57,7 @@ defmodule MeridianWeb.Admin.ExtensionLive.Form do
       </.header>
 
       <MeridianWeb.ExtensionComponents.last_error error={@last_error} />
+      <MeridianWeb.ExtensionComponents.tools tools={@tools} />
 
       <.live_component
         module={MeridianWeb.ExtensionFormComponent}

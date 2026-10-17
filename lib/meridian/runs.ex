@@ -169,6 +169,24 @@ defmodule Meridian.Runs do
   end
 
   @doc false
+  # Saves a message a running run made before its final one (an assistant message that asked
+  # for tools, or a tool's result), with its event (`type`, with the message in the payload's
+  # `message`) at `seq`.
+  def add_message(%Run{} = run, seq, attrs, type, payload \\ %{}) do
+    Repo.transact(fn ->
+      message =
+        Repo.insert!(
+          struct!(Message, Map.merge(attrs, %{thread_id: run.thread_id, run_id: run.id}))
+        )
+
+      payload = Map.put(payload, "message", Message.to_map(message))
+      {:ok, event} = insert_event(run, seq, type, payload)
+      {:ok, {message, event}}
+    end)
+    |> tap(fn {:ok, {_message, event}} -> broadcast_event(run, event) end)
+  end
+
+  @doc false
   # Ends an active run, in one transaction: sets the final status, optionally saves the
   # assistant message, and appends `message.completed` (if there is a message) and the
   # terminal event (`run.completed`, `run.failed`, or `run.cancelled`).

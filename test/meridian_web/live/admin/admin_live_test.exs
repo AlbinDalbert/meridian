@@ -295,6 +295,19 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
       assert Meridian.Extensions.get_extension(extension.id) == nil
     end
 
+    test "shows the tools a script offers", %{conn: conn} do
+      extension =
+        extension_fixture(nil, """
+        return { tools = { roll = { description = "Rolls a die.", run = function() end } } }
+        """)
+
+      {:ok, lv, _html} = live(conn, ~p"/admin/extensions/#{extension}")
+      assert lv |> element("#extension-tools") |> render() =~ "Rolls a die."
+
+      {:ok, lv, _html} = live(conn, ~p"/admin/extensions/#{extension_fixture(nil, "return {}")}")
+      refute has_element?(lv, "#extension-tools")
+    end
+
     test "imports a script from a file into the editor", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/admin/extensions/new")
       lv |> form("#extension-form", extension: %{name: ""}) |> render_change()

@@ -195,11 +195,15 @@ defmodule Meridian.Threads do
     {messages |> Enum.take(limit) |> Enum.reverse(), length(messages) > limit}
   end
 
-  @doc "All messages of a thread up to and including `last_message_id`, oldest first."
-  def list_messages_until(thread_id, last_message_id) do
+  @doc """
+  What a run continues from, oldest first: the thread's messages up to the run's user message,
+  and the messages the run has saved since.
+  """
+  def list_run_history(%Meridian.Runs.Run{} = run) do
     Repo.all(
       from m in Message,
-        where: m.thread_id == ^thread_id and m.id <= ^last_message_id,
+        where:
+          m.thread_id == ^run.thread_id and (m.id <= ^run.user_message_id or m.run_id == ^run.id),
         order_by: m.id
     )
   end

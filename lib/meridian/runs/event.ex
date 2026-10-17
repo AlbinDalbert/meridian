@@ -4,7 +4,10 @@ defmodule Meridian.Runs.Event do
   that has seen up to `seq` can resume from there.
 
   Core types: `run.started`, `run.completed`, `run.failed`, `run.cancelled`, `message.delta`
-  (coalesced text and reasoning deltas), and `message.completed`.
+  (coalesced text and reasoning deltas), `message.completed` (for every message a run saves:
+  replies that call tools, and the final one), `tool_call.started` (`id`, `name`,
+  `arguments`), and `tool_call.completed` (`id`, `name`, `status`, and the saved tool
+  `message`).
   """
   use Ecto.Schema
 

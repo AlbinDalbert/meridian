@@ -17,6 +17,7 @@ defmodule MeridianWeb.Me.ExtensionLive.Form do
       extension: extension,
       editable: true,
       last_error: nil,
+      tools: %{},
       personas: []
     )
   end
@@ -35,6 +36,7 @@ defmodule MeridianWeb.Me.ExtensionLive.Form do
       editable: editable,
       last_error: if(editable, do: Extensions.last_error(extension)),
       description: Extensions.description(extension),
+      tools: Extensions.tools(extension),
       personas:
         user
         |> Personas.list_personas()
@@ -74,6 +76,8 @@ defmodule MeridianWeb.Me.ExtensionLive.Form do
           </.link>
         </:actions>
       </.header>
+
+      <MeridianWeb.ExtensionComponents.tools tools={@tools} />
 
       <%= if @editable do %>
         <MeridianWeb.ExtensionComponents.last_error error={@last_error} />

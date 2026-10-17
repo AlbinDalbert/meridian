@@ -90,6 +90,53 @@ defmodule Meridian.Fixtures do
   end
 
   @doc """
+  Builds the SSE body of a streaming chat completion that asks for tools: `calls` are
+  `{id, name, arguments}` (arguments as JSON text, streamed in two fragments), after the text
+  `deltas`. Ends with `finish_reason: "tool_calls"`, usage, and `[DONE]`.
+  """
+  def tool_call_events(calls, deltas \\ [], opts \\ []) do
+    tool_deltas =
+      calls
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {{id, name, arguments}, index} ->
+        {first, rest} = String.split_at(arguments, div(String.length(arguments), 2))
+
+        [
+          %{
+            "tool_calls" => [
+              %{
+                "index" => index,
+                "id" => id,
+                "type" => "function",
+                "function" => %{"name" => name, "arguments" => first}
+              }
+            ]
+          },
+          %{"tool_calls" => [%{"index" => index, "function" => %{"arguments" => rest}}]}
+        ]
+      end)
+
+    completion_events(deltas ++ tool_deltas, Keyword.put_new(opts, :finish, "tool_calls"))
+  end
+
+  @doc """
+  Like `stub_upstream_stream/1`, but each request gets the next of `responses` (each a list of
+  events); the last one is repeated.
+  """
+  def stub_upstream_streams(responses) do
+    {:ok, agent} = Agent.start_link(fn -> responses end)
+
+    next = fn ->
+      Agent.get_and_update(agent, fn
+        [last] -> {last, [last]}
+        [next | rest] -> {next, rest}
+      end)
+    end
+
+    stub_upstream_stream(next)
+  end
+
+  @doc """
   Stubs a streaming chat completion that sends `events` (see `completion_events/2`) as separate
   chunks. Each request body is sent to the calling process as `{:upstream_request, body}`.
   """
@@ -99,6 +146,7 @@ defmodule Meridian.Fixtures do
     Req.Test.stub(Meridian.Upstream, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       send(test_pid, {:upstream_request, Jason.decode!(body)})
+      events = if is_function(events, 0), do: events.(), else: events
 
       conn =
         conn

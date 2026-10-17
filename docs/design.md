@@ -396,7 +396,7 @@ now, and what each capability will look like for scripts:
 | Call the model, read and title threads | The `meridian` table (`meridian.model.complete`, `meridian.threads.*`) | Yes |
 | Background work           | `jobs` functions, queued with `meridian.jobs.enqueue` (unique keys, delays) | Yes |
 | Configuration             | Settings with defaults, declared by the script, set per persona, checked by the script's `validate` | Yes |
-| Provide model-callable tools | `tools` in the script: name → description, JSON Schema `parameters`, a `run` function (see [Tools](#tools)) | Slice 5 |
+| Provide model-callable tools | `tools` in the script: name → description, JSON Schema `parameters`, a `run` function (see [Tools](#tools)) | Yes |
 | Emit events to clients    | `ext.<name>.<type>` in the run event stream | Later |
 | Own data                  | Key-value storage through the `meridian` table (scripts can't run migrations) | Later |
 | Expose an API             | Routes under `/api/ext/<name>/`, dispatched to the script | Later |
@@ -800,7 +800,7 @@ without a deploy, by the operator or by a user for themselves.*
 **Slice 4: memory extension.** Design TBD (including whether personas share memories). Adds
 extension-owned tables; the real stress test of the extension API.
 
-**Slice 5: tools v0.** *Done when: a tool written in an extension's script is offered to the
+**Slice 5: tools v0.** ✅ *Done when: a tool written in an extension's script is offered to the
 model, called, and its result used, over as many steps as the model needs, in a durable run.*
 
 1. `tools` in scripts, checked on save and shown on the extension pages.

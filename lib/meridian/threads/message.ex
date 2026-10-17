@@ -6,6 +6,11 @@ defmodule Meridian.Threads.Message do
   `%{"type" => "image_url", ...}`, and, for assistant messages, `%{"type" => "reasoning",
   "text" => ...}` (reasoning is kept for display but never sent back upstream). `metadata`
   holds annotations such as the assistant's `finish_reason`.
+
+  An assistant message that asked for tools has `tool_calls` (in the OpenAI format: `id`,
+  `type`, `function` with `name` and `arguments`). Each result is a `tool` message with the
+  call's `tool_call_id`, its `content` one text part, and `metadata.status` `"ok"` or
+  `"error"`.
   """
   use Meridian.Schema
 
@@ -20,6 +25,8 @@ defmodule Meridian.Threads.Message do
     field :content, {:array, :map}, default: []
     field :metadata, :map, default: %{}
     field :usage, :map
+    field :tool_calls, {:array, :map}
+    field :tool_call_id, :string
 
     belongs_to :thread, Meridian.Threads.Thread
     belongs_to :run, Meridian.Runs.Run
@@ -52,15 +59,50 @@ defmodule Meridian.Threads.Message do
       "content" => message.content,
       "metadata" => message.metadata,
       "usage" => message.usage,
+      "tool_calls" => message.tool_calls,
+      "tool_call_id" => message.tool_call_id,
       "inserted_at" => message.inserted_at
     }
+  end
+
+  @doc """
+  A conversation in the OpenAI chat format, for sending upstream (see `to_upstream/1`).
+
+  Each tool message goes right after the assistant message that asked for it, in the order of
+  its `tool_calls`. A call with no result (its run was cancelled or interrupted) gets one
+  saying so, since upstreams reject tool calls without results.
+  """
+  def to_upstream_history(messages) do
+    results = for %__MODULE__{role: "tool"} = m <- messages, into: %{}, do: {m.tool_call_id, m}
+
+    Enum.flat_map(messages, fn
+      %__MODULE__{role: "tool"} ->
+        []
+
+      %__MODULE__{role: "assistant", tool_calls: [_ | _] = calls} = message ->
+        [
+          to_upstream(message)
+          | Enum.map(calls, fn %{"id" => id} ->
+              case Map.fetch(results, id) do
+                {:ok, result} -> to_upstream(result)
+                :error -> tool_result(id, "Error: the tool call was interrupted.")
+              end
+            end)
+        ]
+
+      message ->
+        [to_upstream(message)]
+    end)
   end
 
   @doc """
   The message in the OpenAI chat format, for sending upstream. Reasoning parts are dropped;
   text-only content is sent as a plain string, which every upstream accepts.
   """
-  def to_upstream(%__MODULE__{role: role, content: parts}) do
+  def to_upstream(%__MODULE__{role: "tool"} = message),
+    do: tool_result(message.tool_call_id, text(message))
+
+  def to_upstream(%__MODULE__{role: role, content: parts} = message) do
     parts = Enum.reject(parts, &match?(%{"type" => "reasoning"}, &1))
 
     content =
@@ -68,8 +110,13 @@ defmodule Meridian.Threads.Message do
         do: Enum.map_join(parts, & &1["text"]),
         else: parts
 
-    %{"role" => role, "content" => content}
+    case message.tool_calls do
+      [_ | _] = calls -> %{"role" => role, "content" => content, "tool_calls" => calls}
+      _ -> %{"role" => role, "content" => content}
+    end
   end
+
+  defp tool_result(id, text), do: %{"role" => "tool", "tool_call_id" => id, "content" => text}
 
   @doc "Text of all `text` parts, joined."
   def text(%__MODULE__{content: parts}), do: parts_text(parts, "text")

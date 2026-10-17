@@ -21,6 +21,16 @@ defmodule Meridian.Extensions.Script do
       function M.jobs.cleanup(args, ctx)       -- background work, see meridian.jobs.enqueue
       end
 
+      M.tools = {
+        roll = {                               -- a tool the model can call
+          description = "Rolls a die.",
+          parameters = { type = "object", properties = { sides = { type = "integer" } } },
+          run = function(args, ctx)            -- returns text or a table (sent as JSON)
+            return tostring(math.random(args.sides or 6))
+          end,
+        },
+      }
+
       return M
 
   Scripts run in a sandbox (the `lua` library's: no files, no OS, no `require`), and reach
@@ -40,8 +50,8 @@ defmodule Meridian.Extensions.Script do
   # Where the loaded extension table is kept, so hooks can be called by name.
   @global "__extension"
 
-  @hooks ~w(run_start before_run context before_model_request message_end run_end
-            thread_created thread_deleted)
+  @hooks ~w(run_start before_run context before_model_request message_end tool_call
+            tool_result step_end run_end thread_created thread_deleted)
 
   # Called for every streamed chunk: too hot for scripts.
   @unsupported_hooks ~w(model_stream_event)
@@ -52,10 +62,26 @@ defmodule Meridian.Extensions.Script do
           settings: map(),
           hooks: [String.t()],
           jobs: [String.t()],
+          tools: %{String.t() => tool()},
           validate?: boolean()
         }
 
-  defstruct [:lua, description: "", settings: %{}, hooks: [], jobs: [], validate?: false]
+  @typedoc "A tool's definition: what the model is told about it."
+  @type tool :: %{description: String.t(), parameters: map()}
+
+  defstruct [
+    :lua,
+    description: "",
+    settings: %{},
+    hooks: [],
+    jobs: [],
+    tools: %{},
+    validate?: false
+  ]
+
+  @tool_name ~r/^[a-zA-Z0-9_-]{1,64}$/
+
+  @no_parameters %{"type" => "object", "properties" => %{}}
 
   @doc "The hooks a script can subscribe to, in lifecycle order."
   def hooks, do: @hooks
@@ -93,7 +119,7 @@ defmodule Meridian.Extensions.Script do
   @inspect """
   local m = __extension
   if type(m) ~= "table" then return type(m) end
-  local fields, jobs = {}, {}
+  local fields, jobs, tools = {}, {}, {}
   for k, v in pairs(m) do
     if type(k) == "string" then fields[k] = type(v) end
   end
@@ -102,12 +128,23 @@ defmodule Meridian.Extensions.Script do
       if type(k) == "string" then jobs[k] = type(v) end
     end
   end
-  return "table", fields, jobs
+  if type(m.tools) == "table" then
+    for k, v in pairs(m.tools) do
+      local tool = { key = type(k), name = tostring(k), type = type(v) }
+      if type(v) == "table" then
+        tool.description = type(v.description)
+        tool.parameters = type(v.parameters)
+        tool.run = type(v.run)
+      end
+      table.insert(tools, tool)
+    end
+  end
+  return "table", fields, jobs, tools
   """
 
   defp describe(lua) do
     case Lua.eval!(lua, @inspect) do
-      {["table", fields, jobs], lua} ->
+      {["table", fields, jobs, tools], lua} ->
         fields = from_lua(fields)
         jobs = from_lua(jobs)
 
@@ -115,8 +152,10 @@ defmodule Meridian.Extensions.Script do
              :ok <- check_type(fields, "settings", "table"),
              :ok <- check_type(fields, "validate", "function"),
              :ok <- check_type(fields, "jobs", "table"),
+             :ok <- check_type(fields, "tools", "table"),
              :ok <- check_hooks(fields),
              :ok <- check_jobs(jobs),
+             {:ok, tools} <- tools(lua, as_list(from_lua(tools))),
              {:ok, settings} <- default_settings(lua) do
           {:ok,
            %__MODULE__{
@@ -125,6 +164,7 @@ defmodule Meridian.Extensions.Script do
              settings: settings,
              hooks: Enum.filter(@hooks, &Map.has_key?(fields, &1)),
              jobs: jobs |> Map.keys() |> Enum.sort(),
+             tools: tools,
              validate?: Map.has_key?(fields, "validate")
            }}
         end
@@ -159,6 +199,79 @@ defmodule Meridian.Extensions.Script do
       {_name, "function"} -> nil
       {name, type} -> {:error, "jobs.#{name} must be a function, not a #{type}"}
     end)
+  end
+
+  # An empty Lua table decodes as an empty map.
+  defp as_list(value) when value == %{}, do: []
+  defp as_list(value), do: value
+
+  # `tools` describes each entry of the script's `tools` table (see @inspect).
+  defp tools(lua, tools) do
+    tools
+    |> Enum.sort_by(& &1["name"])
+    |> Enum.reduce_while({:ok, %{}}, fn info, {:ok, acc} ->
+      case tool(lua, info) do
+        {:ok, name, tool} -> {:cont, {:ok, Map.put(acc, name, tool)}}
+        {:error, message} -> {:halt, {:error, message}}
+      end
+    end)
+  end
+
+  defp tool(lua, %{"key" => "string", "name" => name, "type" => "table"} = info) do
+    with :ok <- check_tool_name(name),
+         :ok <- check_tool_field(info, name, "run", "function"),
+         :ok <- check_tool_field(info, name, "description", "string"),
+         {:ok, parameters} <- tool_parameters(lua, name, info["parameters"]) do
+      description = Lua.get!(lua, [@global, "tools", name, "description"])
+
+      if String.trim(description) == "",
+        do: {:error, "tools.#{name}.description can't be empty"},
+        else: {:ok, name, %{description: description, parameters: parameters}}
+    end
+  end
+
+  defp tool(_lua, %{"key" => "string", "name" => name, "type" => type}),
+    do: {:error, "tools.#{name} must be a table, not a #{type}"}
+
+  defp tool(_lua, _info),
+    do: {:error, "tools must be a table of tool names and their definitions"}
+
+  defp check_tool_name(name) do
+    if Regex.match?(@tool_name, name),
+      do: :ok,
+      else: {:error, "tool names may only have letters, digits, '_' and '-': #{inspect(name)}"}
+  end
+
+  defp check_tool_field(info, name, field, type) do
+    case info[field] do
+      ^type -> :ok
+      "nil" -> {:error, "tools.#{name}.#{field} is missing"}
+      other -> {:error, "tools.#{name}.#{field} must be a #{type}, not a #{other}"}
+    end
+  end
+
+  # A JSON Schema object, given as a table or as JSON text.
+  defp tool_parameters(_lua, _name, "nil"), do: {:ok, @no_parameters}
+
+  defp tool_parameters(lua, name, "string") do
+    case Jason.decode(Lua.get!(lua, [@global, "tools", name, "parameters"])) do
+      {:ok, parameters} -> check_parameters(name, parameters)
+      {:error, _} -> {:error, "tools.#{name}.parameters isn't valid JSON"}
+    end
+  end
+
+  defp tool_parameters(lua, name, "table") do
+    parameters = lua |> Lua.get!([@global, "tools", name, "parameters"]) |> from_lua()
+    check_parameters(name, parameters)
+  end
+
+  defp tool_parameters(_lua, name, type),
+    do: {:error, "tools.#{name}.parameters must be a table or JSON text, not a #{type}"}
+
+  defp check_parameters(name, parameters) do
+    if is_map(parameters) and plain?(parameters) and parameters["type"] == "object",
+      do: {:ok, parameters},
+      else: {:error, ~s(tools.#{name}.parameters must be a JSON Schema with type "object")}
   end
 
   defp default_settings(lua) do
@@ -201,13 +314,16 @@ defmodule Meridian.Extensions.Script do
     )
   end
 
-  # Runs `fun` in its own process, so a script can't take down (or bloat) the caller.
+  # Runs `fun` in its own process, so a script can't take down (or bloat) the caller. The
+  # process doesn't outlive the caller either (e.g. a cancelled run killing its tool call).
   defp sandboxed(fun, timeout) do
     max_heap = config(:max_heap_words, 8_000_000)
+    caller = self()
 
     task =
       Task.Supervisor.async_nolink(@task_supervisor, fn ->
         Process.flag(:max_heap_size, %{size: max_heap, kill: true, error_logger: false})
+        exit_with(caller)
         fun.()
       end)
 
@@ -217,6 +333,22 @@ defmodule Meridian.Extensions.Script do
       {:exit, reason} -> {:error, "crashed: " <> Exception.format_exit(reason)}
       nil -> {:error, "took longer than #{timeout} ms"}
     end
+  end
+
+  # Links the calling process to a watcher that ends it when `caller` goes away, and ends
+  # itself when the calling process does.
+  defp exit_with(caller) do
+    process = self()
+
+    spawn_link(fn ->
+      caller_ref = Process.monitor(caller)
+      process_ref = Process.monitor(process)
+
+      receive do
+        {:DOWN, ^caller_ref, :process, _pid, _reason} -> exit(:caller_down)
+        {:DOWN, ^process_ref, :process, _pid, _reason} -> :ok
+      end
+    end)
   end
 
   @doc "Decodes a Lua value (see the moduledoc for how tables come back)."

@@ -16,9 +16,13 @@ defmodule Meridian.Extensions do
   fails, or returns something that isn't a valid value for its hook, is skipped, and the error
   is kept as the extension's latest error (`last_error/1`).
 
+  Scripts can also have tools (see `tool_set/1` and `run_tool/3`), which run with a longer
+  timeout (`:tool_timeout`).
+
   Every handler call emits a `[:meridian, :extensions, :hook]` telemetry event, with the
   `duration` (native time units) and the `extension_id`, `extension` (name), `hook`, and
-  `result` (`:ok` or `:error`).
+  `result` (`:ok` or `:error`). Every tool call emits `[:meridian, :extensions, :tool]`, with
+  `tool` instead of `hook`.
   """
   import Ecto.Query
 
@@ -34,7 +38,22 @@ defmodule Meridian.Extensions do
   @typedoc "An enabled extension: the extension, its loaded script, and the persona's settings."
   @type enabled :: {Extension.t(), Script.t(), map()}
 
+  @typedoc """
+  A tool of an enabled extension, as offered in a run: `name` is what the model sees
+  (`<extension>__<tool>`), `tool` the name in the script, and `definition` what the request
+  says about it (`name`, `description`, `parameters`).
+  """
+  @type tool :: %{
+          name: String.t(),
+          tool: String.t(),
+          enabled: enabled(),
+          definition: map()
+        }
+
   @haltable [:before_run]
+
+  # Upstreams' limit on tool names.
+  @max_tool_name 64
 
   @template """
   -- An extension is the table this script returns: its description, its settings (with
@@ -142,6 +161,14 @@ defmodule Meridian.Extensions do
     case script(extension) do
       {:ok, script} -> script.description
       {:error, _message} -> ""
+    end
+  end
+
+  @doc "The extension's tools, from its script: name => `%{description, parameters}`."
+  def tools(%Extension{} = extension) do
+    case script(extension) do
+      {:ok, script} -> script.tools
+      {:error, _message} -> %{}
     end
   end
 
@@ -256,6 +283,156 @@ defmodule Meridian.Extensions do
 
   def enabled(_persona), do: []
 
+  ## Tools
+
+  @doc """
+  The tools of the enabled extensions, under the names the model sees: `<extension>__<tool>`,
+  shortened to 64 characters if needed, and unique (two extensions can have the same name: a
+  global one and a user's own).
+  """
+  @spec tool_set([enabled()]) :: [tool()]
+  def tool_set(enabled) do
+    {tools, _taken} =
+      for {extension, script, _settings} = entry <- enabled,
+          {tool, definition} <- Enum.sort(script.tools),
+          reduce: {[], MapSet.new()} do
+        {tools, taken} ->
+          name = tool_name(extension, tool, taken)
+
+          tool = %{
+            name: name,
+            tool: tool,
+            enabled: entry,
+            definition: %{
+              "name" => name,
+              "description" => definition.description,
+              "parameters" => definition.parameters
+            }
+          }
+
+          {[tool | tools], MapSet.put(taken, name)}
+      end
+
+    Enum.reverse(tools)
+  end
+
+  defp tool_name(extension, tool, taken) do
+    name = extension.name <> "__" <> tool
+
+    if String.length(name) <= @max_tool_name and not MapSet.member?(taken, name) do
+      name
+    else
+      # Keep it recognisable, and make it unique with a hash of where the tool comes from.
+      hash = :crypto.hash(:sha256, extension.id <> tool) |> Base.encode16(case: :lower)
+      String.slice(name, 0, @max_tool_name - 9) <> "_" <> binary_part(hash, 0, 8)
+    end
+  end
+
+  @doc """
+  Runs `tool` with `arguments` (a map). Returns the result as text for the model (tables are
+  sent as JSON), or an error message: the script raised, timed out, or returned
+  `nil, "message"`.
+  """
+  @spec run_tool(tool(), map(), Context.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def run_tool(%{enabled: {extension, script, settings}, tool: tool}, arguments, ctx) do
+    ctx = %{ctx | settings: settings}
+    started = System.monotonic_time()
+
+    result =
+      Script.call(
+        script,
+        ["tools", tool, "run"],
+        [arguments],
+        call_info(extension, script, ctx),
+        config(:tool_timeout, :timer.seconds(30))
+      )
+
+    :telemetry.execute(
+      [:meridian, :extensions, :tool],
+      %{duration: System.monotonic_time() - started},
+      %{
+        extension_id: extension.id,
+        extension: extension.name,
+        tool: tool,
+        result: elem(result, 0)
+      }
+    )
+
+    case result do
+      {:ok, [nil, message | _]} when is_binary(message) ->
+        {:error, message}
+
+      {:ok, [value | _]} ->
+        tool_text(value)
+
+      {:ok, []} ->
+        {:ok, ""}
+
+      {:error, message} ->
+        record_error(extension, "tools." <> tool, message)
+        {:error, message}
+    end
+  end
+
+  defp tool_text(nil), do: {:ok, ""}
+  defp tool_text(text) when is_binary(text), do: {:ok, text}
+
+  defp tool_text(value) do
+    if Script.plain?(value),
+      do: {:ok, Jason.encode!(value)},
+      else: {:error, "the tool returned something that isn't text or plain data"}
+  end
+
+  @doc """
+  Runs the `tool_call` hook on a call (`id`, `name`, `arguments`). Handlers may rewrite the
+  arguments (by returning the call), or block it with `return false, "reason"`. A handler that
+  fails or returns something invalid blocks the call too: a tool call that couldn't be checked
+  doesn't run.
+  """
+  @spec tool_call([enabled()], map(), Context.t()) :: {:ok, map()} | {:blocked, String.t()}
+  def tool_call(enabled, call, ctx) do
+    Enum.reduce_while(enabled, {:ok, call}, fn {extension, _script, _settings} = entry,
+                                               {:ok, call} ->
+      case call(entry, :tool_call, [call], ctx) do
+        :not_implemented ->
+          {:cont, {:ok, call}}
+
+        :error ->
+          {:halt, {:blocked, "#{extension.name} couldn't check the call"}}
+
+        {:ok, results} ->
+          case results do
+            r when r in [[], [nil]] ->
+              {:cont, {:ok, call}}
+
+            [false, reason | _] when is_binary(reason) ->
+              {:halt, {:blocked, reason}}
+
+            [false | _] ->
+              {:halt, {:blocked, "blocked by #{extension.name}"}}
+
+            [%{"arguments" => arguments} | _] when is_map(arguments) ->
+              if Script.plain?(arguments),
+                do: {:cont, {:ok, %{call | "arguments" => arguments}}},
+                else: {:halt, invalid_tool_call(extension, results)}
+
+            _ ->
+              {:halt, invalid_tool_call(extension, results)}
+          end
+      end
+    end)
+  end
+
+  defp invalid_tool_call(extension, results) do
+    record_error(
+      extension,
+      "tool_call",
+      "returned an invalid value: #{inspect(results, limit: 5, charlists: :as_lists)}"
+    )
+
+    {:blocked, "#{extension.name} couldn't check the call"}
+  end
+
   ## Hooks
 
   @doc """
@@ -339,8 +516,8 @@ defmodule Meridian.Extensions do
     do: %{ctx: ctx, extension_id: extension.id, extension: extension.name, jobs: script.jobs}
 
   # What scripts get for each hook's value: plain maps with string keys.
-  defp to_lua(:before_run, %{system_prompt: sections, params: params}),
-    do: %{"system_prompt" => sections, "params" => params}
+  defp to_lua(:before_run, %{system_prompt: sections, params: params} = config),
+    do: %{"system_prompt" => sections, "params" => params, "tools" => Map.get(config, :tools, [])}
 
   defp to_lua(_hook, %Run{} = run) do
     %{
@@ -363,21 +540,69 @@ defmodule Meridian.Extensions do
        when hook in @haltable and is_binary(reason),
        do: {:halt, reason}
 
-  defp chained_result(hook, [new_value | _], _value) do
-    case from_lua(hook, new_value) do
+  defp chained_result(hook, [new_value | _], value) do
+    case from_lua(hook, new_value, value) do
       {:ok, value} -> {:cont, value}
       :error -> :invalid
     end
   end
 
-  defp from_lua(:before_run, %{"system_prompt" => sections, "params" => params}) do
+  # `value` is what the handler was given, for hooks that may only change part of it.
+  defp from_lua(:before_run, %{"system_prompt" => sections, "params" => params} = new, value) do
     sections = as_list(sections)
     params = as_map(params)
 
-    if is_list(sections) and Enum.all?(sections, &is_binary/1) and is_map(params) and
-         Script.plain?(params),
-       do: {:ok, %{system_prompt: sections, params: params}},
-       else: :error
+    with true <-
+           is_list(sections) and Enum.all?(sections, &is_binary/1) and is_map(params) and
+             Script.plain?(params),
+         {:ok, tools} <- tools_from_lua(Map.get(new, "tools"), Map.get(value, :tools)) do
+      config = %{system_prompt: sections, params: params}
+      {:ok, if(Map.has_key?(value, :tools), do: Map.put(config, :tools, tools), else: config)}
+    else
+      _ -> :error
+    end
+  end
+
+  defp from_lua(:tool_result, %{"content" => content}, value) when is_binary(content),
+    do: {:ok, %{value | "content" => content}}
+
+  defp from_lua(hook, new, _value), do: from_lua(hook, new)
+
+  # `before_run` may remove tools, reorder them, and change their descriptions, but not add
+  # any: a tool needs a script to run it. Parameters stay as the script declared them (a round
+  # trip through Lua would turn empty lists into objects).
+  defp tools_from_lua(nil, tools), do: {:ok, tools}
+  defp tools_from_lua(_new, nil), do: {:ok, nil}
+
+  defp tools_from_lua(new, tools) do
+    known = Map.new(tools, &{&1["name"], &1})
+    new = as_list(new)
+
+    if is_list(new) do
+      Enum.reduce_while(new, {:ok, []}, fn
+        %{"name" => name} = tool, {:ok, acc} when is_map_key(known, name) ->
+          case tool_from_lua(tool, known[name]) do
+            {:ok, tool} -> {:cont, {:ok, [tool | acc]}}
+            :error -> {:halt, :error}
+          end
+
+        _tool, _acc ->
+          {:halt, :error}
+      end)
+      |> case do
+        {:ok, tools} -> {:ok, tools |> Enum.reverse() |> Enum.uniq_by(& &1["name"])}
+        :error -> :error
+      end
+    else
+      :error
+    end
+  end
+
+  defp tool_from_lua(tool, known) do
+    case Map.get(tool, "description", known["description"]) do
+      description when is_binary(description) -> {:ok, %{known | "description" => description}}
+      _ -> :error
+    end
   end
 
   defp from_lua(hook, messages) when hook in [:context, :message_end] do
