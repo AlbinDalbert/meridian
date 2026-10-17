@@ -140,7 +140,8 @@ thread already has an active run (default: `reject` with `409`). *Slice 2 implem
 `reject`; `GET /api/threads/:id/events`, personas, models, keys, and extension routes are not
 built yet.*
 
-WebSocket (Phoenix Channels at `/socket`, authenticated with an API key):
+WebSocket (Phoenix Channels at `/socket`, authenticated with an API key). *Not planned yet: no
+client needs it; REST + SSE covers durable runs.*
 
 - Join `thread:<id>` (optionally with `last_seq` per run) → replay missed events, then receive
   live events for every run on that thread.
@@ -285,11 +286,25 @@ If memory, skills, and title generation can be written as extensions, the API is
 things we haven't thought of. If one of them needs to reach into the core, the API is missing
 something and we fix the API, not add a special case.
 
-And the rule that keeps the extension API from becoming speculative:
+### What an extension is
 
-> **A hook or capability is added when a real extension needs it.** The tables below are the
-> candidate list, not a build list. The first extension (title generation) needs roughly
-> `run_end` + background jobs + `emit`, so that is all v0 implements.
+An extension is **middleware on the run lifecycle, plus a place to keep state and do background
+work, switched on per persona.** Concretely: an Elixir module, compiled into the release, that
+the core calls at fixed hook points during a run. Adding a feature means writing a module and
+listing it in config, not editing the core, and not working around it with MCP servers, skills,
+or prompt instructions. That matters for features like memory, which have to act without the
+model asking (inject what it knows into every request, learn after a run ends); a tool or skill
+only runs when the model decides to call it.
+
+Unlike plain middleware:
+
+- The hook points are fixed by the core. Each one is a contract the core keeps.
+- Some hooks pass data through to be changed, some only observe, a few can halt.
+- Extensions also live outside the chain: they own tables and run background jobs.
+
+Every hook the run lifecycle can fire exists from the start, used or not (see
+[Hook points](#hook-points)). Hooks that depend on core features that don't exist yet (the
+tool loop) arrive with those features.
 
 ### What an extension can do
 
@@ -310,23 +325,37 @@ Modeled on pi's extension API, minus the client/UI parts (Meridian is a server):
 
 ### Hook points
 
-Handlers run inside the run's process, in priority order (then registration order). Each returns
+Handlers run in the process where the lifecycle event happens: the `RunServer` for everything
+inside a run. `run_end` fires once the run's final state is committed, from whichever process
+ended it (the `RunServer`, the janitor, a cancel of a queued run), and never inside the
+transaction. Handlers run in priority order (then registration order). Each returns
 `{:cont, value}` to pass a (possibly modified) value on, or `{:halt, reason}` where halting is
 allowed.
 
-| Hook               | Receives / may change | Can halt? |
-|--------------------|-----------------------|-----------|
-| `run_start`        | Run, thread, persona. Observe; set up per-run state | No |
-| `before_run`       | System prompt sections, tool set, model params for this run | Yes (reject run) |
-| `context`          | The message list about to be sent (inject, trim, summarize, rewrite) | No |
-| `before_model_request` | The final upstream request body (model routing, params) | No |
-| `model_stream_event` | Raw stream events. Read-only, must be fast | No |
-| `tool_call`        | Tool name + arguments (rewrite) | Yes (block → error result to the model) |
-| `tool_result`      | Tool result (redact, transform). Chained | No |
-| `message_end`      | Finalized assistant message (replace content) | No |
-| `step_end`         | Step boundary. May request one more model call (`continue`) | No |
-| `run_end`          | Final outcome. Observe; enqueue follow-up jobs | No |
-| `thread_created` / `thread_deleted` | Thread lifecycle | No |
+Only extensions enabled on the run's persona are called (see
+[Enablement](#enablement-and-configuration)). Every handler receives the value for its hook and
+a context: the run, thread and user ids, the persona, and this extension's settings for that
+persona.
+
+| Hook               | Receives / may change | Can halt? | Available |
+|--------------------|-----------------------|-----------|-----------|
+| `run_start`        | Run, thread, persona. Observe; set up per-run state | No | v0 |
+| `before_run`       | System prompt sections, tool set, model params for this run | Yes (reject run) | v0 |
+| `context`          | The message list about to be sent (inject, trim, summarize, rewrite) | No | v0 |
+| `before_model_request` | The final upstream request body (model routing, params) | No | v0 |
+| `model_stream_event` | Raw stream events. Read-only, must be fast | No | v0 |
+| `tool_call`        | Tool name + arguments (rewrite) | Yes (block → error result to the model) | With the tool loop |
+| `tool_result`      | Tool result (redact, transform). Chained | No | With the tool loop |
+| `message_end`      | Finalized assistant message (replace content) | No | v0 |
+| `step_end`         | Step boundary. May request one more model call (`continue`) | No | With the tool loop |
+| `run_end`          | Final outcome. Observe; enqueue follow-up jobs (must return quickly) | No | v0 |
+| `thread_created` / `thread_deleted` | Thread lifecycle | No | v0 |
+
+Extensions use the core only through one facade, `Meridian.Extension.API` (read threads and
+messages, update a thread, a non-streaming model call, ...), never the internal contexts. That
+is what "built on the public extension API" means, and it is what the built-in extensions are
+tested against. Extension background jobs run on a shared `extensions` Oban queue and must be
+idempotent.
 
 Failure semantics (borrowed from pi): handlers are wrapped with a timeout and `try/rescue`. A
 crashing **observer** is logged and skipped (fail-open). A crashing **`tool_call`** handler
@@ -360,11 +389,20 @@ permissions and see everything. Remote extensions see only what their hook subsc
 
 ### Enablement and configuration
 
-- **Installed** = loaded at boot (deploy config). **Enabled** = active for a given persona.
-- Each persona lists the extensions it enables, with per-persona config.
-- API key policies can further restrict or configure extensions (e.g. a key for a coding agent
-  gets read-only memory). Policy shape: `{"extensions": {"<name>": {...}}}`, merged over
-  persona config, which is merged over deploy config.
+- **Installed** = in the release and listed in deploy config: the library of extensions.
+  **Enabled** = switched on for a given persona. Nothing is on by default; since personas belong
+  to users, a user who doesn't want an extension simply doesn't enable it.
+- `personas.extensions` maps each enabled extension's name to its settings. Present means
+  enabled: `{"datetime": {"timezone": "Europe/Stockholm"}, "title": {}}`.
+- Each extension declares the settings it accepts and their defaults. The admin persona form
+  lists every installed extension with an on/off toggle and its settings, validated on save.
+- Settings are frozen into the run with the rest of the persona (`runs.persona_snapshot`), so
+  changing a persona never affects a run in flight.
+- A persona that lists an extension that isn't installed (anymore) keeps the entry, but it is
+  ignored at run time and shown as "not installed" in the admin UI.
+- *Later:* API key policies further restricting or configuring extensions (e.g. read-only memory
+  for a coding agent's key), merged over persona settings. Deferred: it requires runs to record
+  which key started them.
 
 ## Identity: users, API keys, policies
 
@@ -381,7 +419,7 @@ permissions and see everything. Remote extensions see only what their hook subsc
 {
   "default_persona": "coder",            // used if the client sends an unknown/generic model
   "allowed_personas": ["coder", "default"],
-  "extensions": {                         // per-extension overrides (native surface)
+  "extensions": {                         // per-extension overrides (native surface, later)
     "memory": { "scopes": ["coding"], "write": "explicit" }
   }
 }
@@ -521,22 +559,30 @@ reconnect, and see the full reply.*
 Deferred from slice 2 (see the decision log): crash recovery by resuming runs (`run_steps`,
 `step.restarted`), `if_busy: queue | interrupt`, the thread-level SSE stream.
 
-**Slice 3: extensions.** *Done when: thread titles are generated by an extension using only the
-public extension API.*
+**Slice 3: extension API v0.** *Done when: two built-in extensions, enabled per persona, work
+using only the public extension API.*
 
-1. Minimal extension behaviour + only the hooks title generation needs.
-2. Title generation extension.
-3. Phoenix Channels transport (can move earlier if the first-party client wants it).
+1. `Meridian.Extension` behaviour, the hook pipeline (every v0 hook in
+   [Hook points](#hook-points), with timeouts and fail-open/closed semantics), and the
+   `Meridian.Extension.API` facade.
+2. Per-persona enablement and settings, including the admin persona form.
+3. `datetime` extension: injects the current date and time into the context (`context` hook),
+   with a per-persona timezone setting.
+4. `title` extension: after a thread's first completed run, a background job asks the model for
+   a title and sets it only if the thread still has none (`run_end` hook, Oban job, model call
+   from an extension). Clients see it the next time they fetch the thread.
+
+**Slice 4: memory extension.** Design TBD (including whether personas share memories). Adds
+extension-owned tables; the real stress test of the extension API.
 
 **Next**
-
-- First memory extension (design TBD), the real test of the extension API
 - Tools from extensions + MCP-backed tools
 - Skills extension
 - Tool approval (`awaiting_approval`)
 
 **Later**
 
+- Phoenix Channels transport (WebSocket), and the thread-level SSE stream
 - `EXTENSIONS_DIR` runtime loading, remote extensions, maybe WASM
 - Responses API surface
 - OIDC login for admin (and maybe users)
@@ -555,7 +601,7 @@ Add an entry whenever a decision is made or reversed.
 | **Stateless `/v1` is a pure persona proxy** | Server tools/memory on `/v1` | Mixing server and client tool calls in one stateless response is messy (every tool call needs a result the client doesn't have; server tool exchanges vanish from the client's history). Keep it dead simple; revisit later (open question 1). |
 | **Personas exposed as model ids** | Custom headers, per-key persona only | Works in every OpenAI client without changes: pick `meridian/<persona>` as the model. |
 | **Memory is an extension, not core** | Building pgvector memory into core | The memory design (vector store, graph, Honcho, reflective vs. explicit) is undecided. Making it an extension defers the choice and tests the extension API. |
-| **Core features are extensions; hooks added on demand** | Designing the full hook API up front | Keeps the extension API real (proven by our own features) without building speculative hooks. |
+| ~~**Core features are extensions; hooks added on demand**~~ *Reversed in slice 3, see below* | Designing the full hook API up front | Keeps the extension API real (proven by our own features) without building speculative hooks. |
 | **One callback per hook** | A single `handle_hook/3` | Discoverability and Dialyzer. Remote extensions get a generic form at the protocol boundary. |
 | **SSE + Phoenix Channels over one event log** | SSE only; WebSocket only | SSE for simple clients/curl, Channels for rich bidirectional clients. Neither has special semantics. |
 | **Admin UI is LiveView in the same release** | Separate SPA (e.g. TS) | One deployable, no extra API client or CORS. The live run view subscribes to the same PubSub topics as clients. No Node toolchain: the LiveView JS can be served from the dependency. |
@@ -583,6 +629,12 @@ Add an entry whenever a decision is made or reversed.
 | **The `RunServer` never blocks on the upstream**: the request runs in a linked helper process (`Meridian.Upstream.Stream`) that forwards the response as messages | Calling `Req` (`into: :self`) from the `RunServer` | `Req` blocks its caller until response headers arrive, which can take minutes. A blocked `RunServer` can't handle cancels or send heartbeats, so the janitor would fail a live run. The same rule applies to any future work that waits on external services (tools, extension calls). |
 | **A run only completes if the upstream reported a `finish_reason`**; a stream that ends without one, or contains an event that isn't valid JSON, fails the run (`upstream_incomplete` / `upstream_error`) and saves no reply. `[DONE]` is not required if a finish reason arrived | Treating the end of the HTTP body as success; skipping malformed events | A dropped connection must not be saved as a complete answer, especially once `run_end` hooks act on completed runs. Partial text is only kept for cancels, where the user chose to stop. |
 | **UUIDv7 ids are generated with monotonic precision** | Millisecond precision | Messages are ordered by id; ids created within the same millisecond must still sort in creation order. |
+| **Every hook the run lifecycle can fire exists from v0, used or not** (replaces "hooks added on demand"). Tool hooks and `step_end` come with the tool loop | Adding each hook only when an extension needs it | Extensions should be able to hook anything in the lifecycle without a core change first; that is the point of the API. Unused hooks are covered by tests instead of a consumer. Core features remain extensions. |
+| **Extensions are enabled per persona, off by default**; `personas.extensions` maps name → settings (present = enabled), frozen into the run's persona snapshot | Global enablement; on-by-default extensions | Users and personas differ (memory on one persona only, or not at all). Since personas belong to users, this also gives per-user control. |
+| **API key policy overrides for extensions are deferred** | Building deploy → persona → key merging now | Runs don't record which key started them, so background work couldn't apply the key layer. Per-persona settings cover the need for now. |
+| **Extensions call the core only through `Meridian.Extension.API`** | Extensions calling internal contexts (`Threads`, `Upstream`) | Gives "built only on the public extension API" a real meaning and keeps the core free to change internally. |
+| **`run_end` fires after the run's final state is committed, from whichever process ended it** | Only from the `RunServer` | Runs also end in the janitor, the worker (crash), and when a queued run is cancelled. Every end fires the hook exactly once, and handlers never run inside the transaction. |
+| **Slice 3 is proven by two tiny extensions (`datetime`, `title`); memory gets its own slice; Channels are dropped for now** | Title generation alone; memory in slice 3; Channels in slice 3 | Titles alone only exercise `run_end`. Memory's design (e.g. shared across personas or not) is a memory question, not an API one. No client needs WebSockets yet. |
 
 ## Open questions
 
