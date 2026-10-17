@@ -263,7 +263,7 @@ defmodule Meridian.RunsTest do
       end)
 
       task = Task.async(fn -> execute(run) end)
-      assert_receive {:upstream_called, request_pid}
+      assert_receive {:upstream_called, request_pid}, 2000
       request_ref = Process.monitor(request_pid)
 
       run = Runs.get_run!(run.id)

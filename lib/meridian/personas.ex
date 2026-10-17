@@ -43,6 +43,16 @@ defmodule Meridian.Personas do
     |> Enum.frequencies()
   end
 
+  @doc """
+  How many personas enable each skill, by skill id, whether it still exists or not. Skills no
+  persona enables aren't in the map.
+  """
+  def count_by_skill do
+    Repo.all(from p in Persona, select: p.skills)
+    |> List.flatten()
+    |> Enum.frequencies()
+  end
+
   def get_persona!(id), do: Repo.get!(Persona, id)
 
   @doc "Gets persona `id` if it belongs to `user`; raises `Ecto.NoResultsError` otherwise."

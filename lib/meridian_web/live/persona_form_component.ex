@@ -10,7 +10,7 @@ defmodule MeridianWeb.PersonaFormComponent do
   """
   use MeridianWeb, :live_component
 
-  alias Meridian.{Extensions, Personas, Upstream}
+  alias Meridian.{Extensions, Personas, Skills, Upstream}
 
   @impl true
   def update(assigns, socket) do
@@ -24,6 +24,7 @@ defmodule MeridianWeb.PersonaFormComponent do
         |> assign(form: to_form(Personas.change_persona(socket.assigns.persona)), force: false)
         |> assign(advanced_open: false)
         |> assign_extensions()
+        |> assign_skills()
         |> assign_upstream_models()
       end
 
@@ -53,6 +54,48 @@ defmodule MeridianWeb.PersonaFormComponent do
 
     available = Enum.map(rows, & &1.id)
     assign(socket, extensions: rows, missing_extensions: Map.keys(enabled) -- available)
+  end
+
+  # One row per skill the persona's user can use, and whether it's on. A skill's recommended
+  # extensions are checked against the extension rows as they are in the form (see
+  # `skill_warning/2`).
+  defp assign_skills(socket) do
+    enabled = socket.assigns.persona.skills
+
+    rows =
+      for skill <- Skills.list_available(socket.assigns.user) do
+        %{
+          id: skill.id,
+          name: skill.name,
+          own: not is_nil(skill.user_id),
+          description: skill.description,
+          recommended: skill.recommended_extensions,
+          enabled: skill.id in enabled
+        }
+      end
+
+    assign(socket, skills: rows, missing_skills: enabled -- Enum.map(rows, & &1.id))
+  end
+
+  # A warning for a skill that's on without all the extensions it recommends; nothing is
+  # stopped, it's only a hint.
+  defp skill_warning(skill, extensions) do
+    names = Map.new(extensions, &{&1.id, &1.name})
+    on = for %{enabled: true, id: id} <- extensions, do: id
+
+    case skill.recommended -- on do
+      [] ->
+        nil
+
+      missing ->
+        {available, gone} = Enum.split_with(missing, &Map.has_key?(names, &1))
+
+        parts =
+          Enum.map(available, &names[&1]) ++
+            if(gone == [], do: [], else: ["#{length(gone)} that you can't use"])
+
+        "Works best with #{Enum.join(parts, ", ")}, which #{if length(missing) == 1, do: "isn't", else: "aren't"} on for this persona."
+    end
   end
 
   defp missing_text(1), do: "Settings for 1 extension that's gone"
@@ -132,6 +175,32 @@ defmodule MeridianWeb.PersonaFormComponent do
           </p>
           <.error :for={{message, _opts} <- @form[:extensions].errors}>{message}</.error>
         </fieldset>
+        <fieldset class="field" id="persona-skills">
+          <legend>Skills</legend>
+          <p :if={@skills == []} class="hint">No skills to turn on yet.</p>
+          <div :for={skill <- @skills} class="extension">
+            <.input
+              type="checkbox"
+              id={"skill-#{skill.id}"}
+              name={"skills[#{skill.id}]"}
+              checked={skill.enabled}
+              label={if skill.own, do: "#{skill.name} (own)", else: skill.name}
+              description={skill.description}
+            />
+            <p
+              :if={skill.enabled && skill_warning(skill, @extensions)}
+              id={"skill-#{skill.id}-warning"}
+              class="hint warning"
+            >
+              {skill_warning(skill, @extensions)}
+            </p>
+          </div>
+          <p :if={@missing_skills != []} class="hint">
+            {length(@missing_skills)} {if length(@missing_skills) == 1,
+              do: "skill that's gone",
+              else: "skills that are gone"} (kept, but ignored).
+          </p>
+        </fieldset>
         <%!-- Whether it's open lives on the server (toggle_advanced), so the re-render after every
              change doesn't close it, and it opens by itself to show an error inside. --%>
         <details id="persona-advanced" class="advanced" open={@advanced_open}>
@@ -191,8 +260,12 @@ defmodule MeridianWeb.PersonaFormComponent do
   end
 
   def handle_event("validate", %{"persona" => params} = all, socket) do
-    socket = update_extensions(socket, all["extensions"] || %{})
-    params = params |> decode_params() |> put_extensions(socket)
+    socket =
+      socket
+      |> update_extensions(all["extensions"] || %{})
+      |> update_skills(all["skills"] || %{})
+
+    params = params |> decode_params() |> put_extensions(socket) |> put_skills(socket)
     changeset = Personas.change_persona(socket.assigns.persona, params)
 
     {:noreply,
@@ -203,8 +276,13 @@ defmodule MeridianWeb.PersonaFormComponent do
 
   def handle_event("save", %{"persona" => params} = all, socket) do
     force = all["force"] == "true"
-    socket = update_extensions(socket, all["extensions"] || %{})
-    params = params |> decode_params() |> put_extensions(socket)
+
+    socket =
+      socket
+      |> update_extensions(all["extensions"] || %{})
+      |> update_skills(all["skills"] || %{})
+
+    params = params |> decode_params() |> put_extensions(socket) |> put_skills(socket)
     persona = socket.assigns.persona
 
     result =
@@ -253,6 +331,24 @@ defmodule MeridianWeb.PersonaFormComponent do
       end
 
     assign(socket, extensions: rows)
+  end
+
+  defp update_skills(socket, submitted) do
+    rows =
+      for skill <- socket.assigns.skills do
+        case submitted[skill.id] do
+          nil -> skill
+          value -> %{skill | enabled: value == "true"}
+        end
+      end
+
+    assign(socket, skills: rows)
+  end
+
+  # The persona's `skills`: the enabled rows, plus skills that are gone, which are kept.
+  defp put_skills(attrs, socket) do
+    enabled = for %{enabled: true, id: id} <- socket.assigns.skills, do: id
+    Map.put(attrs, "skills", socket.assigns.missing_skills ++ enabled)
   end
 
   # The persona's `extensions`: the enabled rows with their settings, plus entries for

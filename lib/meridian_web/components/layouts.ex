@@ -166,6 +166,7 @@ defmodule MeridianWeb.Layouts do
       {"Configure",
        configure_items(%{
          crew: {~p"/admin/crew", ["/admin/personas/"]},
+         skills: {~p"/admin/skills", ["/admin/skills/"]},
          extensions: {~p"/admin/extensions", ["/admin/extensions/"]}
        })}
     ]
@@ -176,15 +177,20 @@ defmodule MeridianWeb.Layouts do
       {"Configure",
        configure_items(%{
          crew: {~p"/me", ["/me/personas/"]},
+         skills: {~p"/me/skills", ["/me/skills/"]},
          extensions: {~p"/me/extensions", ["/me/extensions/"]}
        })}
     ]
   end
 
-  defp configure_items(%{crew: {crew, crew_match}, extensions: {extensions, extensions_match}}) do
+  defp configure_items(%{
+         crew: {crew, crew_match},
+         skills: {skills, skills_match},
+         extensions: {extensions, extensions_match}
+       }) do
     [
       %{label: "Crew", to: crew, match: crew_match},
-      %{label: "Skills"},
+      %{label: "Skills", to: skills, match: skills_match},
       %{label: "MCPs"},
       %{label: "Extensions", to: extensions, match: extensions_match}
     ]

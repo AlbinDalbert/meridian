@@ -362,6 +362,10 @@ details.advanced[open] summary { margin-bottom: 1rem; }
 .hl-comment { color: var(--muted); font-style: italic; }
 .hl-builtin { color: var(--hl-builtin); }
 
+/* Text that isn't code, e.g. a skill's instructions, read-only. */
+pre.code-view.prose-view { white-space: pre-wrap; font-family: inherit; font-size: inherit; }
+.hint.warning { color: var(--hl-number); }
+
 pre.code-view {
   margin: 0 0 1.5rem;
   padding: 0.75rem 1rem;

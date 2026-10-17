@@ -172,7 +172,7 @@ Navigation is a sidebar in two groups. **Operate** is the console's own: users, 
 requests, runs. **Configure** is the group `/me` has too: the crew (every user's personas, at
 `/admin/crew`), skills, MCPs, and extensions (every extension, global and users' own, how many
 personas enable each, and the script editor). The pages behind an entry differ between the two areas, but the entries match, so the
-console reads as `/me` plus operating. Skills and MCPs are listed as "soon" until they exist.
+console reads as `/me` plus operating. MCPs are listed as "soon" until they exist.
 
 **Crew** is what the UI calls a set of personas (a user's personas, the personas a key allows),
 however many there are, zero and one included. A single persona is still a persona. The code
@@ -236,8 +236,8 @@ still no signup.
   same reason `/admin` does.
 - Personas are loaded through `Personas.get_persona!(user, id)`, so another user's id is a 404.
 - Browser apps find it as `account_url` in `GET /api/auth/session`.
-- The sidebar has the admin console's **Configure** group: crew (`/me`), skills and MCPs
-  (soon), and extensions (`/me/extensions`: the global ones, which you can read, and your own,
+- The sidebar has the admin console's **Configure** group: crew (`/me`), skills (the global
+  ones, which you can read, and your own), MCPs (soon), and extensions (`/me/extensions`: the global ones, which you can read, and your own,
   which you write there; and which of your personas use each).
 - *Later:* self-service API keys, browsing your own threads.
 
@@ -468,6 +468,9 @@ M.tools = {
   messages get `message.completed` like the final one, so a run can complete several messages.
   The admin console shows the event types and times only, as for every event.
 
+`load_skill` (see [Skills](#skills)) is the one tool that isn't an extension's: the core runs
+it.
+
 Not in the first version: HTTP for scripts (`meridian.http`, which needs its own SSRF rules),
 so tools are pure Lua plus the `meridian` table; resuming a run after a crash (`run_steps`; a
 crash still fails the run); approval; client-side tools on `/api`; tools on `/v1` (it stays a
@@ -582,6 +585,28 @@ subscriptions send.
   for a coding agent's key), merged over persona settings. Deferred: it requires runs to record
   which key started them.
 
+## Skills
+
+A skill is instructions for a kind of task: a **name**, a **description** (what it's for, and
+when to use it), and a **prompt** (the instructions). Like extensions, skills are global (made
+in `/admin/skills`) or a user's own (made in `/me/skills`), and personas enable them by id
+(`personas.skills`); ids of skills that are gone are kept but ignored. A user's own skill with
+the same name as a global one replaces it.
+
+**Progressive disclosure.** The model doesn't get every skill's instructions on every request.
+A run with skills adds a section to the system prompt (after the persona's) listing each
+enabled skill's name and description, and offers a `load_skill` tool (its `name` parameter is
+an enum of the enabled skills) that returns a skill's prompt. The model loads a skill when a
+task matches its description, so a skill costs only its description until it's needed. The
+section and the tool go through `before_run` like everything else, so an extension can see or
+drop them; calls go through `tool_call` and `tool_result`. The run uses the skills as they
+were when it started.
+
+**Recommended extensions.** A skill can list extensions it works best with (a database skill
+might want an HTTP extension). It's a hint, not a dependency: a persona that enables the skill
+without one of them gets a warning in the persona form, and nothing else happens. A global
+skill can only recommend global extensions.
+
 ## Identity: users, API keys, policies
 
 - **Users** are generic: id, display name, email (required, unique case-insensitively, since
@@ -675,7 +700,7 @@ All ids are UUIDv7 (time-ordered). Timestamps are `utc_datetime_usec`.
 users           id, name, email, oidc_issuer?, oidc_subject?, inserted_at
 api_keys        id, user_id, name, prefix, token_hash, policy jsonb, last_used_at, revoked_at
 personas        id, user_id, slug, name, system_prompt, model, params jsonb,
-                extensions jsonb, is_default
+                extensions jsonb, skills uuid[], is_default
 threads         id, user_id, persona_id, title, settings jsonb, archived_at, inserted_at, updated_at
 messages        id, thread_id, run_id?, parent_id?, role (user, assistant, tool), content jsonb (parts),
                 tool_calls jsonb?, tool_call_id?, metadata jsonb, usage jsonb?, inserted_at
@@ -686,6 +711,7 @@ run_steps       id, run_id, index, status, request jsonb, response jsonb, tool_r
 run_events      run_id, seq, type, payload jsonb, inserted_at        -- PK (run_id, seq)
 extensions      id, name, source, user_id?                         -- user_id null = global
 extension_state extension_id, scope_type, scope_id, key, value jsonb -- KV for scripts (later)
+skills          id, name, description, prompt, recommended_extensions uuid[], user_id?
 ```
 
 Notes:
@@ -808,12 +834,14 @@ model, called, and its result used, over as many steps as the model needs, in a 
    `tool_result`, and `step_end` hooks.
 3. Tool calls and tool messages saved in the thread and sent back upstream.
 
+**Slice 6: skills.** ✅ *Done when: a skill written in `/me` or `/admin` is offered to the
+model by the personas that enable it, and loaded when a task calls for it.*
+
 **Next**
 - `meridian.http` for scripts (with SSRF rules), so tools can call APIs
 - Resuming runs after a crash (`run_steps`)
 - Tool approval (`awaiting_approval`), client-side tools on `/api`
 - MCP-backed tools
-- Skills extension
 
 **Later**
 
@@ -910,6 +938,10 @@ Add an entry whenever a decision is made or reversed.
 | **Tool calls are approved automatically, for now** | Building approval (`awaiting_approval`) with the loop | The point of the first version is the execution path. Approval needs runs that pause and resume, which needs `run_steps`. |
 | **`context` and `before_model_request` run before every model call; `before_run` once per run** | Calling every hook once per run | Extensions that trim or inject history must see the tool messages of earlier steps, and every request goes through the same path. The system prompt, params, and tool set are the run's and don't change between steps. |
 | **A tool call without a result is sent upstream as interrupted** | Saving placeholder results when a run ends; leaving the history as it is | Upstreams reject an assistant `tool_calls` message without a result for every call. Fixing it when the history is built covers every way a run can end (cancel, failure, a dead node) in one place. |
+| **Skills are core data, not an extension**: rows with a name, description, and prompt, global or a user's own, enabled per persona, with their own pages | A skills extension in Lua reading skills through the `meridian` table; skills as files | A skill is content, not code: writing one should be filling in a form, and it should work without someone first writing the extension that delivers it. It reuses the extension model (global or own, enabled by id, gone ids kept) so there's nothing new to learn. Amends "core features are extensions" for this one feature. |
+| **Skills reach the model by progressive disclosure: an index in the system prompt and a core `load_skill` tool** | Every enabled skill's full prompt in the system prompt; a Lua extension delivering them | Skills can be long; a description per skill keeps every request small, and the model pulls in the rest when a task needs it (the Agent Skills approach). `load_skill` is the one tool the core runs itself; it goes through the same hooks as extension tools, and its name can't clash with theirs (`<extension>__<tool>`). |
+| **A skill's recommended extensions are a warning, not a requirement** | Required extensions that enable themselves, or block the skill | Avoids hard links between skills and extensions while there's only a handful of each. The persona form says what's missing; runs don't change. |
+| **A user's own skill replaces a global one with the same name** | Both, with prefixed names; refusing the duplicate | The model addresses skills by name, so two with one name can't both be offered. Users overriding a global skill with their own version is the useful reading. |
 
 ## Open questions
 

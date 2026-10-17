@@ -258,7 +258,7 @@ defmodule MeridianWeb.ApiTest do
       end)
 
       run_task = Task.async(fn -> execute(run_id) end)
-      assert_receive {:upstream_called, server_pid}
+      assert_receive {:upstream_called, server_pid}, 2000
 
       # The run has started but not finished: the client sees what exists so far, then the
       # rest live.

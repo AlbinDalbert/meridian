@@ -31,7 +31,7 @@ defmodule Meridian.Runs.RunServer do
 
   require Logger
 
-  alias Meridian.{Extensions, Personas, Runs, Threads, Upstream}
+  alias Meridian.{Extensions, Personas, Runs, Skills, Threads, Upstream}
   alias Meridian.Extensions.Context
   alias Meridian.Runs.Run
   alias Meridian.Threads.Message
@@ -141,13 +141,16 @@ defmodule Meridian.Runs.RunServer do
   end
 
   # `before_run` decides what holds for the whole run: the persona's system prompt (as
-  # sections), its params, and the tools of the enabled extensions.
+  # sections, with the index of its skills), its params, and the tools (the enabled
+  # extensions', and `load_skill`).
   defp configure(%{ctx: ctx, extensions: extensions} = state) do
     persona = ctx.persona
-    tool_set = Extensions.tool_set(extensions)
+    skills = Skills.enabled(persona)
+    tool_set = Extensions.tool_set(extensions) ++ List.wrap(Skills.tool(skills))
 
     config = %{
-      system_prompt: [persona.system_prompt],
+      system_prompt:
+        Enum.reject([persona.system_prompt, Skills.prompt_section(skills)], &is_nil/1),
       params: persona.params,
       tools: Enum.map(tool_set, & &1.definition)
     }
@@ -538,7 +541,7 @@ defmodule Meridian.Runs.RunServer do
 
       task =
         Task.Supervisor.async_nolink(Meridian.Extensions.TaskSupervisor, fn ->
-          Extensions.run_tool(tool, call["arguments"], ctx)
+          execute_tool(tool, call["arguments"], ctx)
         end)
 
       %{state | running_tools: Map.put(state.running_tools, task.ref, {call, task})}
@@ -546,6 +549,10 @@ defmodule Meridian.Runs.RunServer do
       {:error, message} -> tool_done(state, call, {"error", "Error: " <> message})
     end
   end
+
+  # `load_skill` is the core's own tool; every other tool is an extension's.
+  defp execute_tool(%{skills: _} = tool, arguments, _ctx), do: Skills.load(tool, arguments)
+  defp execute_tool(tool, arguments, ctx), do: Extensions.run_tool(tool, arguments, ctx)
 
   defp fetch_tool(state, name) do
     case Map.fetch(state.tools, name) do

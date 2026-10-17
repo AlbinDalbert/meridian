@@ -120,6 +120,9 @@ defmodule MeridianWeb.Router do
       live "/extensions", ExtensionLive.Index, :index
       live "/extensions/new", ExtensionLive.Form, :new
       live "/extensions/:id", ExtensionLive.Form, :edit
+      live "/skills", SkillLive.Index, :index
+      live "/skills/new", SkillLive.Form, :new
+      live "/skills/:id", SkillLive.Form, :edit
     end
   end
 
@@ -146,6 +149,9 @@ defmodule MeridianWeb.Router do
       live "/extensions", ExtensionLive.Index, :index
       live "/extensions/new", ExtensionLive.Form, :new
       live "/extensions/:id", ExtensionLive.Form, :edit
+      live "/skills", SkillLive.Index, :index
+      live "/skills/new", SkillLive.Form, :new
+      live "/skills/:id", SkillLive.Form, :edit
     end
   end
 end

@@ -4,7 +4,8 @@ defmodule Meridian.Personas.Persona do
   the model `meridian/<slug>`.
 
   `extensions` maps the id of each extension the persona enables to its settings (see
-  `Meridian.Extensions`).
+  `Meridian.Extensions`). `skills` lists the ids of the skills it enables (see
+  `Meridian.Skills`).
   """
   use Meridian.Schema
 
@@ -21,6 +22,7 @@ defmodule Meridian.Personas.Persona do
     field :model, :string
     field :params, :map, default: %{}
     field :extensions, :map, default: %{}
+    field :skills, {:array, :binary_id}, default: []
     field :is_default, :boolean, default: false
 
     belongs_to :user, Meridian.Accounts.User
@@ -31,7 +33,7 @@ defmodule Meridian.Personas.Persona do
   @doc false
   def changeset(persona, attrs) do
     persona
-    |> cast(attrs, [:slug, :name, :system_prompt, :model, :params, :extensions],
+    |> cast(attrs, [:slug, :name, :system_prompt, :model, :params, :extensions, :skills],
       empty_values: [nil]
     )
     |> update_change(:slug, &String.trim/1)
@@ -75,7 +77,7 @@ defmodule Meridian.Personas.Persona do
   def slug_from_model_id(@model_prefix <> slug) when slug != "", do: {:ok, slug}
   def slug_from_model_id(_model_id), do: :error
 
-  @snapshot_fields ~w(id user_id slug name system_prompt model params extensions)a
+  @snapshot_fields ~w(id user_id slug name system_prompt model params extensions skills)a
 
   @doc """
   The persona's configuration as a plain map, for freezing into a run (`runs.persona_snapshot`).
@@ -87,6 +89,7 @@ defmodule Meridian.Personas.Persona do
   @doc "Rebuilds a (non-persisted) persona from `snapshot/1`."
   def from_snapshot(%{} = snapshot) do
     fields = for field <- @snapshot_fields, do: {field, Map.get(snapshot, Atom.to_string(field))}
-    struct!(__MODULE__, fields)
+    # Runs from before skills existed have none.
+    struct!(__MODULE__, Keyword.update!(fields, :skills, &(&1 || [])))
   end
 end

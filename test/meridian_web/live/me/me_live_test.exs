@@ -83,7 +83,7 @@ defmodule MeridianWeb.Me.MeLiveTest do
     stub_upstream_models(["qwen"])
     {:ok, lv, _html} = live(conn, ~p"/me/personas/new")
     assert lv |> element(".sidebar a.active", "Crew") |> has_element?()
-    assert lv |> element(".sidebar .disabled", "Skills") |> has_element?()
+    assert lv |> element(".sidebar .disabled", "MCPs") |> has_element?()
   end
 
   test "extensions show which of the user's crew use them", %{conn: conn, user: user} do
@@ -97,6 +97,51 @@ defmodule MeridianWeb.Me.MeLiveTest do
     assert lv |> element("#extensions a", "Clock") |> has_element?()
     refute html =~ "Theirs"
     assert lv |> element(".sidebar a.active", "Extensions") |> has_element?()
+  end
+
+  describe "skills" do
+    test "global skills can be read, the user's own edited, others' not seen", %{
+      conn: conn,
+      user: user
+    } do
+      {:ok, global} =
+        Meridian.Skills.create_skill(nil, %{
+          "name" => "everyones",
+          "description" => "For all.",
+          "prompt" => "Global instructions."
+        })
+
+      {:ok, theirs} =
+        Meridian.Skills.create_skill(user_fixture(), %{
+          "name" => "theirs",
+          "description" => "Not yours.",
+          "prompt" => "x"
+        })
+
+      {:ok, lv, _html} = live(conn, ~p"/me/skills/new")
+
+      {:ok, _lv, html} =
+        lv
+        |> form("#skill-form", skill: %{name: "mine", description: "Mine.", prompt: "My way."})
+        |> render_submit()
+        |> follow_redirect(conn)
+
+      assert html =~ "Skill saved."
+
+      {:ok, lv, html} = live(conn, ~p"/me/skills")
+      assert lv |> element("#skills tr", "everyones") |> render() =~ "global"
+      assert lv |> element("#skills tr", "mine") |> render() =~ "yours"
+      refute html =~ "theirs"
+
+      {:ok, lv, _html} = live(conn, ~p"/me/skills/#{global}")
+      refute has_element?(lv, "#skill-form")
+      assert lv |> element("#skill-prompt") |> render() =~ "Global instructions."
+
+      assert_raise Ecto.NoResultsError, fn -> live(conn, ~p"/me/skills/#{theirs}") end
+
+      [mine] = Enum.filter(Meridian.Skills.list_available(user), &(&1.name == "mine"))
+      assert mine.user_id == user.id
+    end
   end
 
   describe "extensions" do

@@ -201,6 +201,88 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
            }
   end
 
+  describe "skills" do
+    test "creating a global skill that recommends extensions", %{conn: conn} do
+      curl = extension_fixture(nil, "return {}", %{"name" => "curl"})
+      extension_fixture(user_fixture(), "return {}", %{"name" => "users-own"})
+
+      {:ok, lv, html} = live(conn, ~p"/admin/skills/new")
+      # A global skill can only recommend global extensions.
+      assert html =~ "curl"
+      refute html =~ "users-own"
+
+      assert lv
+             |> form("#skill-form", skill: %{name: "Bad", description: "", prompt: ""})
+             |> render_submit() =~ "can&#39;t be blank"
+
+      {:ok, _lv, html} =
+        lv
+        |> form("#skill-form",
+          skill: %{
+            name: "db-fetching",
+            description: "Fetching data.",
+            prompt: "Use curl.",
+            recommended_extensions: [curl.id]
+          }
+        )
+        |> render_submit()
+        |> follow_redirect(conn)
+
+      assert html =~ "Skill saved."
+      assert [skill] = Meridian.Skills.list_skills()
+      assert skill.recommended_extensions == [curl.id]
+      assert skill.user_id == nil
+
+      {:ok, lv, _html} = live(conn, ~p"/admin/skills")
+      assert lv |> element("#skills tr", "db-fetching") |> render() =~ "0 personas"
+      assert lv |> element(".sidebar a.active", "Skills") |> has_element?()
+    end
+
+    test "the persona form warns about a skill's missing extensions", %{conn: conn} do
+      user = user_fixture()
+      stub_upstream_models(["upstream-model"])
+      persona = Personas.get_default_persona(user)
+      curl = extension_fixture(nil, "return {}", %{"name" => "curl"})
+
+      {:ok, skill} =
+        Meridian.Skills.create_skill(nil, %{
+          "name" => "db-fetching",
+          "description" => "Fetching data.",
+          "prompt" => "Use curl.",
+          "recommended_extensions" => [curl.id]
+        })
+
+      {:ok, lv, _html} = live(conn, ~p"/admin/personas/#{persona}/edit")
+      refute has_element?(lv, "#skill-#{skill.id}-warning")
+
+      lv |> form("#persona-form", skills: %{skill.id => "true"}) |> render_change()
+
+      assert lv |> element("#skill-#{skill.id}-warning") |> render() =~
+               "Works best with curl, which isn&#39;t on for this persona."
+
+      lv
+      |> form("#persona-form",
+        skills: %{skill.id => "true"},
+        extensions: %{curl.id => %{enabled: "true"}}
+      )
+      |> render_change()
+
+      refute has_element?(lv, "#skill-#{skill.id}-warning")
+
+      # The warning doesn't stop saving.
+      {:ok, _lv, _html} =
+        lv
+        |> form("#persona-form",
+          skills: %{skill.id => "true"},
+          extensions: %{curl.id => %{enabled: "false"}}
+        )
+        |> render_submit()
+        |> follow_redirect(conn)
+
+      assert Personas.get_persona!(persona.id).skills == [skill.id]
+    end
+  end
+
   test "making a persona the default and deleting personas", %{conn: conn} do
     user = user_fixture()
     persona = persona_fixture(user, %{"slug" => "coder"})
