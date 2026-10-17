@@ -15,6 +15,9 @@
   --info-bg: #e7f0ec;
   --error-bg: #f7e4e2;
   --radius: 6px;
+  --hl-number: #a0522d;
+  --hl-string: #3f7d3f;
+  --hl-builtin: #5b5bb0;
   color-scheme: light dark;
 }
 
@@ -31,6 +34,9 @@
     --danger: #e0786f;
     --info-bg: #1f2e28;
     --error-bg: #3a2220;
+    --hl-number: #e0a070;
+    --hl-string: #9cc97f;
+    --hl-builtin: #a5a5f0;
   }
 }
 
@@ -47,6 +53,9 @@ body.theme-me {
   --danger: #e0786f;
   --info-bg: rgba(223, 161, 61, 0.12);
   --error-bg: #3a2220;
+  --hl-number: #e8a87c;
+  --hl-string: #b5c98a;
+  --hl-builtin: #c9a6e8;
   color-scheme: dark;
 }
 
@@ -319,6 +328,40 @@ details.advanced[open] summary { margin-bottom: 1rem; }
   white-space: pre;
   overflow: auto;
 }
+/* The editor is a transparent textarea (only its caret and selection show) over a copy of its
+   text with the highlighting; both have the same font, padding, and border, so they line up. */
+.code-editor-wrap { position: relative; }
+.code-editor-wrap pre.code-highlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.9em;
+  line-height: 1.45;
+  tab-size: 2;
+  white-space: pre;
+  overflow: hidden;
+  pointer-events: none;
+}
+.code-editor-wrap textarea.code-editor {
+  position: relative;
+  display: block;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+}
+.code-editor-wrap textarea.code-editor::selection { color: transparent; background: var(--info-bg); }
+.hl-keyword { color: var(--accent); }
+.hl-literal, .hl-number { color: var(--hl-number); }
+.hl-string { color: var(--hl-string); }
+.hl-comment { color: var(--muted); font-style: italic; }
+.hl-builtin { color: var(--hl-builtin); }
+
 pre.code-view {
   margin: 0 0 1.5rem;
   padding: 0.75rem 1rem;

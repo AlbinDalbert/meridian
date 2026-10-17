@@ -60,16 +60,9 @@ defmodule MeridianWeb.ExtensionFormComponent do
           hint="Lowercase letters, digits, '-' and '_'. Shown in lists and in persona forms."
           required
         />
-        <.input
+        <MeridianWeb.ExtensionComponents.code_editor
           field={@form[:source]}
-          type="textarea"
           label="Script"
-          class="code-editor"
-          rows="28"
-          spellcheck="false"
-          autocomplete="off"
-          phx-hook="CodeEditor"
-          phx-debounce="300"
           hint="Lua. Tab indents (Esc first to leave the editor with Tab); Ctrl+S saves."
         />
         <div class="field import" phx-drop-target={@uploads.script.ref}>

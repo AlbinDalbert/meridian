@@ -1,11 +1,52 @@
 defmodule MeridianWeb.ExtensionComponents do
   @moduledoc """
-  Pieces of the extension pages shared by the admin console and `/me`: a script's latest
-  error, its tools, a read-only view of a script, and the reference for writing one.
+  Pieces of the extension pages shared by the admin console and `/me`: the script editor, a
+  script's latest error, its tools, a read-only view of a script, and the reference for writing
+  one.
   """
   use Phoenix.Component
 
-  import MeridianWeb.CoreComponents, only: [format_time: 1]
+  import MeridianWeb.CoreComponents, only: [error: 1, format_time: 1, translate_error: 1]
+
+  @doc """
+  The script editor: a textarea over a highlighted copy of its text (the `CodeEditor` hook in
+  `live.js` keeps the copy in sync), so it stays a plain form field.
+  """
+  attr :field, Phoenix.HTML.FormField, required: true
+  attr :label, :string, required: true
+  attr :hint, :string, default: nil
+
+  def code_editor(assigns) do
+    errors = if used_input?(assigns.field), do: assigns.field.errors, else: []
+    assigns = assign(assigns, :errors, Enum.map(errors, &translate_error/1))
+
+    ~H"""
+    <div class="field">
+      <label for={@field.id}>{@label}</label>
+      <div class="code-editor-wrap">
+        <pre
+          id={@field.id <> "-highlight"}
+          class="code-highlight"
+          aria-hidden="true"
+          phx-update="ignore"
+        ></pre>
+        <textarea
+          id={@field.id}
+          name={@field.name}
+          class="code-editor"
+          rows="28"
+          spellcheck="false"
+          autocomplete="off"
+          phx-hook="CodeEditor"
+          phx-debounce="300"
+          data-highlight={@field.id <> "-highlight"}
+        >{Phoenix.HTML.Form.normalize_value("textarea", @field.value)}</textarea>
+      </div>
+      <p :if={@hint} class="hint">{@hint}</p>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
 
   @doc "The extension's latest error (see `Meridian.Extensions.last_error/1`), if it has one."
   attr :error, :map, default: nil
@@ -45,7 +86,7 @@ defmodule MeridianWeb.ExtensionComponents do
 
   def source_view(assigns) do
     ~H"""
-    <pre id="extension-source" class="code-view">{@source}</pre>
+    <pre id="extension-source" class="code-view" phx-hook="CodeView">{@source}</pre>
     """
   end
 
