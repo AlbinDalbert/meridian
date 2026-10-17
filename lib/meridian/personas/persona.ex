@@ -3,7 +3,7 @@ defmodule Meridian.Personas.Persona do
   A named bundle of system prompt, upstream model, and default params, presented to clients as
   the model `meridian/<slug>`.
 
-  `extensions` maps the name of each extension the persona enables to its settings (see
+  `extensions` maps the id of each extension the persona enables to its settings (see
   `Meridian.Extensions`).
   """
   use Meridian.Schema
@@ -49,7 +49,9 @@ defmodule Meridian.Personas.Persona do
         else: []
     end)
     |> validate_change(:extensions, fn :extensions, extensions ->
-      Enum.map(Meridian.Extensions.settings_errors(extensions), &{:extensions, &1})
+      extensions
+      |> Meridian.Extensions.settings_errors(persona.user_id)
+      |> Enum.map(&{:extensions, &1})
     end)
     |> unique_constraint(:slug, name: :personas_user_id_slug_index)
   end

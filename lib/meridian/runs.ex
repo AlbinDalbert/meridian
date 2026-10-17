@@ -23,7 +23,7 @@ defmodule Meridian.Runs do
   require Logger
 
   alias Meridian.Accounts.User
-  alias Meridian.Extension.Context
+  alias Meridian.Extensions.Context
   alias Meridian.{Extensions, Repo}
   alias Meridian.Runs.{Event, Run}
   alias Meridian.Threads.{Message, Thread}

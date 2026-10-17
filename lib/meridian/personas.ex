@@ -32,8 +32,8 @@ defmodule Meridian.Personas do
   end
 
   @doc """
-  How many personas enable each extension, by extension name, installed or not. Extensions no
-  persona enables aren't in the map.
+  How many personas enable each extension, by extension id, whether it still exists or not.
+  Extensions no persona enables aren't in the map.
   """
   def count_by_extension do
     Repo.all(

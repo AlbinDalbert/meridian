@@ -10,7 +10,7 @@ defmodule Meridian.Threads do
   alias Meridian.Accounts.ApiKey.Policy
   alias Meridian.Accounts.User
   alias Meridian.{Extensions, Personas, Repo}
-  alias Meridian.Extension.Context
+  alias Meridian.Extensions.Context
   alias Meridian.Personas.Persona
   alias Meridian.Runs.{Run, Worker}
   alias Meridian.Threads.{Message, Thread}

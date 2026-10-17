@@ -1,12 +1,19 @@
 defmodule MeridianWeb.Admin.CrewLive.Index do
   use MeridianWeb, :live_view
 
-  alias Meridian.Personas
+  alias Meridian.{Extensions, Personas}
   alias Meridian.Personas.Persona
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, page_title: "Crew", personas: Personas.list_all_personas())}
+    extension_names = Map.new(Extensions.list_extensions(), &{&1.id, &1.name})
+
+    {:ok,
+     assign(socket,
+       page_title: "Crew",
+       personas: Personas.list_all_personas(),
+       extension_names: extension_names
+     )}
   end
 
   @impl true
@@ -32,7 +39,11 @@ defmodule MeridianWeb.Admin.CrewLive.Index do
         <:col :let={persona} label="Name">{persona.name}</:col>
         <:col :let={persona} label="Upstream model"><code>{persona.model}</code></:col>
         <:col :let={persona} label="Extensions">
-          {persona.extensions |> Map.keys() |> Enum.sort() |> Enum.join(", ")}
+          {persona.extensions
+          |> Map.keys()
+          |> Enum.flat_map(&List.wrap(@extension_names[&1]))
+          |> Enum.sort()
+          |> Enum.join(", ")}
         </:col>
         <:action :let={persona}>
           <.link navigate={~p"/admin/personas/#{persona}/edit"}>Edit</.link>

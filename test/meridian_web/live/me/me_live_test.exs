@@ -50,19 +50,22 @@ defmodule MeridianWeb.Me.MeLiveTest do
     persona = Personas.get_persona_by_slug(user, "coder")
     assert %{model: "qwen", params: %{"temperature" => 0.2}} = persona
 
+    extension = extension_fixture(nil, "return {}")
     {:ok, lv, _html} = live(conn, ~p"/me/personas/#{persona}/edit")
 
     {:ok, _lv, _html} =
       lv
       |> form("#persona-form",
         persona: %{system_prompt: "Be terse."},
-        extensions: %{datetime: %{enabled: "true"}}
+        extensions: %{extension.id => %{enabled: "true"}}
       )
       |> render_submit()
       |> follow_redirect(conn, ~p"/me")
 
-    assert %{system_prompt: "Be terse.", extensions: %{"datetime" => _}} =
+    assert %{system_prompt: "Be terse.", extensions: extensions} =
              Personas.get_persona!(persona.id)
+
+    assert Map.keys(extensions) == [extension.id]
   end
 
   test "making a persona the default and deleting personas", %{conn: conn, user: user} do
@@ -84,13 +87,61 @@ defmodule MeridianWeb.Me.MeLiveTest do
   end
 
   test "extensions show which of the user's crew use them", %{conn: conn, user: user} do
-    persona_fixture(user, %{"name" => "Clock", "extensions" => %{"datetime" => %{}}})
-    persona_fixture(user_fixture(), %{"name" => "Theirs", "extensions" => %{"title" => %{}}})
+    clock = extension_fixture(nil, ~s(return { description = "Adds the current date and time." }))
+    title = extension_fixture(nil, "return {}")
+    persona_fixture(user, %{"name" => "Clock", "extensions" => %{clock.id => %{}}})
+    persona_fixture(user_fixture(), %{"name" => "Theirs", "extensions" => %{title.id => %{}}})
 
     {:ok, lv, html} = live(conn, ~p"/me/extensions")
     assert html =~ "Adds the current date and time"
     assert lv |> element("#extensions a", "Clock") |> has_element?()
     refute html =~ "Theirs"
     assert lv |> element(".sidebar a.active", "Extensions") |> has_element?()
+  end
+
+  describe "extensions" do
+    test "lists global extensions and the user's own, not anyone else's", %{
+      conn: conn,
+      user: user
+    } do
+      global = extension_fixture(nil, "return {}", %{"name" => "everyones"})
+      mine = extension_fixture(user, "return {}", %{"name" => "mine"})
+      theirs = extension_fixture(user_fixture(), "return {}", %{"name" => "theirs"})
+
+      {:ok, lv, html} = live(conn, ~p"/me/extensions")
+      assert lv |> element("#extensions tr", "everyones") |> render() =~ "global"
+      assert lv |> element("#extensions tr", "mine") |> render() =~ "yours"
+      refute html =~ "theirs"
+
+      assert_raise Ecto.NoResultsError, fn -> live(conn, ~p"/me/extensions/#{theirs}") end
+
+      assert_raise Ecto.NoResultsError, fn ->
+        get(conn, ~p"/me/extensions/#{theirs}/export")
+      end
+
+      # Global extensions can be read and exported, not edited.
+      {:ok, lv, html} = live(conn, ~p"/me/extensions/#{global}")
+      assert html =~ "A global extension"
+      refute has_element?(lv, "#extension-form")
+      assert lv |> element("#extension-source") |> render() =~ "return {}"
+      assert get(conn, ~p"/me/extensions/#{global}/export") |> response(200) == "return {}"
+
+      {:ok, lv, _html} = live(conn, ~p"/me/extensions/#{mine}")
+      assert has_element?(lv, "#extension-form")
+    end
+
+    test "creating one makes it the user's own", %{conn: conn, user: user} do
+      {:ok, lv, _html} = live(conn, ~p"/me/extensions/new")
+
+      {:ok, _lv, html} =
+        lv
+        |> form("#extension-form", extension: %{name: "mine", source: "return {}"})
+        |> render_submit()
+        |> follow_redirect(conn)
+
+      assert html =~ "Extension saved."
+      assert [%{name: "mine"} = extension] = Meridian.Extensions.list_available(user)
+      assert extension.user_id == user.id
+    end
   end
 end

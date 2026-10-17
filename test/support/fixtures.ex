@@ -2,7 +2,7 @@ defmodule Meridian.Fixtures do
   @moduledoc """
   Test helpers for creating users, personas, and API keys, plus a stubbed upstream.
   """
-  alias Meridian.{Accounts, Personas, Threads}
+  alias Meridian.{Accounts, Extensions, Personas, Threads}
   alias Meridian.Accounts.ApiKey.Policy
 
   def unique_name(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
@@ -34,6 +34,17 @@ defmodule Meridian.Fixtures do
       )
 
     persona
+  end
+
+  @doc "Creates an extension with `source`: `owner`'s own, or global for nil."
+  def extension_fixture(owner, source, attrs \\ %{}) do
+    {:ok, extension} =
+      Extensions.create_extension(
+        owner,
+        Map.merge(%{"name" => unique_name("ext"), "source" => source}, attrs)
+      )
+
+    extension
   end
 
   @doc "Mints an API key. The plaintext token is in the `:token` field."

@@ -310,3 +310,37 @@ details.advanced {
 }
 details.advanced summary { font-weight: 500; margin-bottom: 0; }
 details.advanced[open] summary { margin-bottom: 1rem; }
+
+/* Extensions: the script editor, a read-only script, the latest error, and the reference. */
+.field textarea.code-editor, pre.code-view {
+  min-height: 28rem;
+  line-height: 1.45;
+  tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+}
+pre.code-view {
+  margin: 0 0 1.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.9em;
+  min-height: 0;
+}
+.field.import input[type=file] { padding: 0.35rem; }
+.form-actions .push-right { margin-left: auto; }
+section.extension-error { border-color: var(--danger); margin-bottom: 1.25rem; padding: 1rem 1.25rem; }
+section.extension-error p { margin: 0; }
+section.extension-error pre {
+  margin: 0.5rem 0;
+  color: var(--danger);
+  white-space: pre-wrap;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.85em;
+}
+details.reference { margin-top: 2rem; }
+details.reference summary { font-weight: 500; }
+details.reference h3 { font-size: 1rem; margin: 1.5rem 0 0.5rem; }
+details.reference dl.details { gap: 0.5rem 1.5rem; }

@@ -11,11 +11,11 @@ config :meridian,
   ecto_repos: [Meridian.Repo],
   generators: [timestamp_type: :utc_datetime_usec, binary_id: true]
 
-# Installed extensions (see Meridian.Extension). Each one is off until a persona enables it.
-config :meridian, :extensions, [Meridian.Ext.Datetime, Meridian.Ext.Title]
-
-# Extension hook handlers that take longer than this (milliseconds) are skipped.
-config :meridian, Meridian.Extensions, hook_timeout: :timer.seconds(5)
+# Extensions are Lua scripts kept in the database (see Meridian.Extensions). Hook handlers that
+# take longer than `hook_timeout` (milliseconds) are skipped; background jobs get `job_timeout`.
+config :meridian, Meridian.Extensions,
+  hook_timeout: :timer.seconds(5),
+  job_timeout: :timer.minutes(1)
 
 config :elixir, :time_zone_database, Tz.TimeZoneDatabase
 

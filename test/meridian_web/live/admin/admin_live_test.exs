@@ -143,46 +143,61 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
     assert lv |> element("#persona-advanced summary") |> render() =~ "1 default param<"
   end
 
+  @clock """
+  return {
+    description = "Tells the time.",
+    settings = { timezone = "Etc/UTC" },
+    validate = function(settings)
+      if not meridian.now(settings.timezone) then return "unknown timezone" end
+    end,
+  }
+  """
+
   test "enabling and configuring extensions on a persona", %{conn: conn} do
     user = user_fixture()
     stub_upstream_models(["upstream-model"])
     persona = Personas.get_default_persona(user)
+    clock = extension_fixture(nil, @clock, %{"name" => "clock"})
+    own = extension_fixture(user, "return {}", %{"name" => "theirs"})
+    other = extension_fixture(user_fixture(), "return {}", %{"name" => "someone-elses"})
+    gone = Ecto.UUID.generate()
 
-    {:ok, _persona} =
-      Personas.update_persona(persona, %{"extensions" => %{"gone" => %{"x" => 1}}})
+    {:ok, _persona} = Personas.update_persona(persona, %{"extensions" => %{gone => %{"x" => 1}}})
 
     {:ok, lv, html} = live(conn, ~p"/admin/personas/#{persona}/edit")
-    assert html =~ "Not installed (kept, but ignored): gone"
-    refute has_element?(lv, "#extension-datetime-settings")
+    assert html =~ "Settings for 1 extension that&#39;s gone (kept, but ignored)."
+    assert html =~ "theirs (own)"
+    refute html =~ other.name
+    refute has_element?(lv, "#extension-#{clock.id}-settings")
 
     # Switching an extension on shows its settings, with the defaults filled in.
     lv
-    |> form("#persona-form", extensions: %{datetime: %{enabled: "true"}})
+    |> form("#persona-form", extensions: %{clock.id => %{enabled: "true"}})
     |> render_change()
 
-    assert lv |> element("#extension-datetime-settings") |> render() =~ "Etc/UTC"
+    assert lv |> element("#extension-#{clock.id}-settings") |> render() =~ "Etc/UTC"
 
     assert lv
            |> form("#persona-form",
-             extensions: %{datetime: %{enabled: "true", settings: ~s({"timezone": "Nowhere"})}}
+             extensions: %{clock.id => %{enabled: "true", settings: ~s({"timezone": "Nowhere"})}}
            )
-           |> render_submit() =~ "unknown timezone"
+           |> render_submit() =~ "clock: unknown timezone"
 
     {:ok, _lv, _html} =
       lv
       |> form("#persona-form",
         extensions: %{
-          datetime: %{enabled: "true", settings: ~s({"timezone": "Europe/Stockholm"})},
-          title: %{enabled: "true"}
+          clock.id => %{enabled: "true", settings: ~s({"timezone": "Europe/Stockholm"})},
+          own.id => %{enabled: "true"}
         }
       )
       |> render_submit()
       |> follow_redirect(conn)
 
     assert Personas.get_persona!(persona.id).extensions == %{
-             "datetime" => %{"timezone" => "Europe/Stockholm"},
-             "title" => %{"model" => nil},
-             "gone" => %{"x" => 1}
+             clock.id => %{"timezone" => "Europe/Stockholm"},
+             own.id => %{},
+             gone => %{"x" => 1}
            }
   end
 
@@ -200,7 +215,8 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
 
   test "the crew page lists every user's personas", %{conn: conn} do
     ada = user_fixture(%{"name" => "Ada"})
-    persona_fixture(ada, %{"slug" => "coder", "extensions" => %{"datetime" => %{}}})
+    clock = extension_fixture(nil, "return {}", %{"name" => "clock"})
+    persona_fixture(ada, %{"slug" => "coder", "extensions" => %{clock.id => %{}}})
     persona_fixture(user_fixture(%{"name" => "Bob"}), %{"slug" => "writer"})
 
     {:ok, lv, html} = live(conn, ~p"/admin/crew")
@@ -208,15 +224,101 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
     assert html =~ "meridian/writer"
     assert lv |> element("#crew a", "Ada") |> has_element?()
     assert lv |> element(".sidebar a.active", "Crew") |> has_element?()
+    assert lv |> element("#crew tr", "meridian/coder") |> render() =~ "clock"
   end
 
-  test "the extensions page counts the personas that enable each one", %{conn: conn} do
-    user = user_fixture()
-    persona_fixture(user, %{"extensions" => %{"datetime" => %{}}})
-    persona_fixture(user, %{"extensions" => %{"datetime" => %{}, "gone" => %{}}})
+  test "the extensions page lists every extension", %{conn: conn} do
+    user = user_fixture(%{"name" => "Ada"})
+    clock = extension_fixture(nil, @clock, %{"name" => "clock"})
+    extension_fixture(nil, "return {}", %{"name" => "unused"})
+    extension_fixture(user, "return {}", %{"name" => "adas"})
+    persona_fixture(user, %{"extensions" => %{clock.id => %{}}})
+    persona_fixture(user, %{"extensions" => %{clock.id => %{}}})
 
     {:ok, lv, _html} = live(conn, ~p"/admin/extensions")
-    assert lv |> element("#extensions tr", "datetime") |> render() =~ "2 personas"
-    assert lv |> element("#extensions tr", "title") |> render() =~ "0 personas"
+    assert lv |> element("#extensions tr", "clock") |> render() =~ "2 personas"
+    assert lv |> element("#extensions tr", "clock") |> render() =~ "Tells the time."
+    assert lv |> element("#extensions tr", "clock") |> render() =~ "global"
+    assert lv |> element("#extensions tr", "unused") |> render() =~ "0 personas"
+    assert lv |> element("#extensions tr", "adas") |> render() =~ "Ada"
+  end
+
+  describe "the extension editor" do
+    test "creates global extensions, and refuses broken scripts", %{conn: conn} do
+      {:ok, lv, html} = live(conn, ~p"/admin/extensions/new")
+      # New extensions start from a template.
+      assert html =~ "function M.before_run"
+
+      assert lv
+             |> form("#extension-form", extension: %{name: "hello", source: "return 1"})
+             |> render_submit() =~ "the script must return a table"
+
+      {:ok, _lv, html} =
+        lv
+        |> form("#extension-form", extension: %{name: "hello", source: @clock})
+        |> render_submit()
+        |> follow_redirect(conn)
+
+      assert html =~ "Extension saved."
+      assert [%{name: "hello", user_id: nil}] = Meridian.Extensions.list_extensions()
+    end
+
+    test "edits any extension, shows its latest error, and deletes it", %{conn: conn} do
+      user = user_fixture()
+      extension = extension_fixture(user, "return {}", %{"name" => "users-own"})
+
+      {:ok, lv, html} = live(conn, ~p"/admin/extensions/#{extension}")
+      assert html =~ "Belongs to"
+      refute has_element?(lv, "#extension-error")
+
+      send(
+        lv.pid,
+        {:extension_error, extension.id,
+         %{where: "run_end", message: "boom", at: DateTime.utc_now()}}
+      )
+
+      assert lv |> element("#extension-error") |> render() =~ "boom"
+
+      {:ok, lv, _html} =
+        lv
+        |> form("#extension-form", extension: %{source: "return { description = \"New\" }"})
+        |> render_submit()
+        |> follow_redirect(conn)
+
+      assert Meridian.Extensions.description(Meridian.Extensions.get_extension!(extension.id)) ==
+               "New"
+
+      {:ok, _lv, html} =
+        lv |> element("button", "Delete") |> render_click() |> follow_redirect(conn)
+
+      assert html =~ "Extension deleted."
+      assert Meridian.Extensions.get_extension(extension.id) == nil
+    end
+
+    test "imports a script from a file into the editor", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/admin/extensions/new")
+      lv |> form("#extension-form", extension: %{name: ""}) |> render_change()
+
+      script =
+        file_input(lv, "#extension-form", :script, [
+          %{name: "My Clock.lua", content: @clock, type: "text/plain"}
+        ])
+
+      render_upload(script, "My Clock.lua")
+      assert lv |> element("#extension_name") |> render() =~ ~s(value="my-clock")
+      assert lv |> element("#extension_source") |> render() =~ "Tells the time."
+      # Only imported: nothing is saved until it's saved.
+      assert Meridian.Extensions.list_extensions() == []
+    end
+
+    test "exports a script", %{conn: conn} do
+      extension = extension_fixture(nil, @clock, %{"name" => "clock"})
+      conn = get(conn, ~p"/admin/extensions/#{extension}/export")
+      assert response(conn, 200) == @clock
+
+      assert get_resp_header(conn, "content-disposition") == [
+               ~s(attachment; filename="clock.lua")
+             ]
+    end
   end
 end

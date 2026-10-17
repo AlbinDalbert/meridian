@@ -5,14 +5,15 @@ defmodule MeridianWeb.Me.ExtensionLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    personas = Personas.list_personas(socket.assigns.current_user)
+    user = socket.assigns.current_user
+    personas = Personas.list_personas(user)
 
     extensions =
-      Enum.map(Extensions.installed(), fn module ->
+      Enum.map(Extensions.list_available(user), fn extension ->
         %{
-          name: module.name(),
-          description: Extensions.description(module),
-          personas: Enum.filter(personas, &Map.has_key?(&1.extensions, module.name()))
+          extension: extension,
+          description: Extensions.description(extension),
+          personas: Enum.filter(personas, &Map.has_key?(&1.extensions, extension.id))
         }
       end)
 
@@ -26,17 +27,25 @@ defmodule MeridianWeb.Me.ExtensionLive.Index do
       <.header>
         Extensions
         <:subtitle>
-          What your crew can use. Turn one on for a persona, and change its settings, when editing
-          that persona.
+          What your crew can use: global extensions, and your own. Turn one on for a persona, and
+          change its settings, when editing that persona.
         </:subtitle>
+        <:actions>
+          <.link navigate={~p"/me/extensions/new"} class="btn btn-primary">New extension</.link>
+        </:actions>
       </.header>
 
       <.table id="extensions" rows={@extensions} empty="No extensions available.">
-        <:col :let={ext} label="Name"><code>{ext.name}</code></:col>
-        <:col :let={ext} label="Description">{ext.description}</:col>
-        <:col :let={ext} label="On for">
-          <span :if={ext.personas == []} class="muted">nobody yet</span>
-          <%= for persona <- ext.personas do %>
+        <:col :let={row} label="Name">
+          <.link navigate={~p"/me/extensions/#{row.extension}"}>
+            <code>{row.extension.name}</code>
+          </.link>
+          <span class="badge">{if row.extension.user_id, do: "yours", else: "global"}</span>
+        </:col>
+        <:col :let={row} label="Description">{row.description}</:col>
+        <:col :let={row} label="On for">
+          <span :if={row.personas == []} class="muted">nobody yet</span>
+          <%= for persona <- row.personas do %>
             <.link navigate={~p"/me/personas/#{persona}/edit"}>{persona.name}</.link>{" "}
           <% end %>
         </:col>

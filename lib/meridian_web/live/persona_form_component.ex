@@ -30,27 +30,33 @@ defmodule MeridianWeb.PersonaFormComponent do
     {:ok, socket}
   end
 
-  # One row per installed extension: whether it's enabled and its settings as JSON text. The
-  # persona's settings are shown merged over the defaults, so every setting is visible.
+  # One row per extension the persona's user can use (the global ones and their own): whether
+  # it's enabled and its settings as JSON text. The persona's settings are shown merged over the
+  # defaults, so every setting is visible.
   defp assign_extensions(socket) do
     enabled = socket.assigns.persona.extensions
 
     rows =
-      for module <- Extensions.installed() do
-        name = module.name()
-        settings = Map.merge(Extensions.default_settings(module), Map.get(enabled, name, %{}))
+      for extension <- Extensions.list_available(socket.assigns.user) do
+        id = extension.id
+        settings = Map.merge(Extensions.default_settings(extension), Map.get(enabled, id, %{}))
 
         %{
-          name: name,
-          description: Extensions.description(module),
-          enabled: Map.has_key?(enabled, name),
+          id: id,
+          name: extension.name,
+          own: not is_nil(extension.user_id),
+          description: Extensions.description(extension),
+          enabled: Map.has_key?(enabled, id),
           settings: settings_text(settings)
         }
       end
 
-    installed = Enum.map(rows, & &1.name)
-    assign(socket, extensions: rows, missing_extensions: Map.keys(enabled) -- installed)
+    available = Enum.map(rows, & &1.id)
+    assign(socket, extensions: rows, missing_extensions: Map.keys(enabled) -- available)
   end
+
+  defp missing_text(1), do: "Settings for 1 extension that's gone"
+  defp missing_text(count), do: "Settings for #{count} extensions that are gone"
 
   defp settings_text(settings) when map_size(settings) == 0, do: ""
   defp settings_text(settings), do: Jason.encode!(settings, pretty: true)
@@ -100,20 +106,21 @@ defmodule MeridianWeb.PersonaFormComponent do
         />
         <fieldset class="field" id="persona-extensions">
           <legend>Extensions</legend>
+          <p :if={@extensions == []} class="hint">No extensions to turn on yet.</p>
           <div :for={ext <- @extensions} class="extension">
             <.input
               type="checkbox"
-              id={"extension-#{ext.name}"}
-              name={"extensions[#{ext.name}][enabled]"}
+              id={"extension-#{ext.id}"}
+              name={"extensions[#{ext.id}][enabled]"}
               checked={ext.enabled}
-              label={ext.name}
+              label={if ext.own, do: "#{ext.name} (own)", else: ext.name}
               description={ext.description}
             />
             <.input
               :if={ext.enabled}
               type="textarea"
-              id={"extension-#{ext.name}-settings"}
-              name={"extensions[#{ext.name}][settings]"}
+              id={"extension-#{ext.id}-settings"}
+              name={"extensions[#{ext.id}][settings]"}
               value={ext.settings}
               label="Settings"
               rows="3"
@@ -121,7 +128,7 @@ defmodule MeridianWeb.PersonaFormComponent do
             />
           </div>
           <p :if={@missing_extensions != []} class="hint">
-            Not installed (kept, but ignored): {Enum.join(@missing_extensions, ", ")}
+            {missing_text(length(@missing_extensions))} (kept, but ignored).
           </p>
           <.error :for={{message, _opts} <- @form[:extensions].errors}>{message}</.error>
         </fieldset>
@@ -232,7 +239,7 @@ defmodule MeridianWeb.PersonaFormComponent do
   defp update_extensions(socket, submitted) do
     rows =
       for ext <- socket.assigns.extensions do
-        case submitted[ext.name] do
+        case submitted[ext.id] do
           %{} = params ->
             %{
               ext
@@ -249,14 +256,14 @@ defmodule MeridianWeb.PersonaFormComponent do
   end
 
   # The persona's `extensions`: the enabled rows with their settings, plus entries for
-  # extensions that aren't installed, which are kept as they were. Settings that aren't a JSON
+  # extensions that are gone, which are kept as they were. Settings that aren't a JSON
   # object are passed on as text, so the changeset rejects them.
   defp put_extensions(attrs, socket) do
     kept = Map.take(socket.assigns.persona.extensions, socket.assigns.missing_extensions)
 
     enabled =
       for %{enabled: true} = ext <- socket.assigns.extensions, into: %{} do
-        {ext.name, decode_json_object(ext.settings)}
+        {ext.id, decode_json_object(ext.settings)}
       end
 
     Map.put(attrs, "extensions", Map.merge(kept, enabled))

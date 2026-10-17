@@ -15,8 +15,7 @@ defmodule Meridian.Runs.RunServer do
 
   Enabled extensions (`Meridian.Extensions`) are called at each stage: `run_start`, then
   `before_run` (which may reject the run), `context` and `before_model_request` while building
-  the request, `model_stream_event` for each upstream chunk, and `message_end` before the reply
-  is saved. `run_end` fires from `Meridian.Runs.finish_run/3`.
+  the request, and `message_end` before the reply is saved. `run_end` fires from `Meridian.Runs.finish_run/3`.
 
   Text and reasoning deltas are buffered and emitted as one `message.delta` event per
   `:delta_flush_interval` (milliseconds; `0` emits one event per upstream chunk), so the event
@@ -27,7 +26,7 @@ defmodule Meridian.Runs.RunServer do
   require Logger
 
   alias Meridian.{Extensions, Personas, Runs, Threads, Upstream}
-  alias Meridian.Extension.Context
+  alias Meridian.Extensions.Context
   alias Meridian.Runs.Run
   alias Meridian.Threads.Message
   alias Meridian.Upstream.SSE
@@ -253,7 +252,6 @@ defmodule Meridian.Runs.RunServer do
          state}
 
       {:ok, %{} = chunk} ->
-        Extensions.notify(state.extensions, :model_stream_event, [chunk], state.ctx)
         handle_events(rest, handle_chunk(chunk, state))
 
       _ ->

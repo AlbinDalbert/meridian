@@ -17,6 +17,7 @@ defmodule Meridian.Application do
       # Extension hook handlers run here. Before the run supervisor, so it outlives the runs on
       # shutdown (an interrupted run still fires run_end).
       {Task.Supervisor, name: Meridian.Extensions.TaskSupervisor},
+      Meridian.Extensions.Cache,
       {Registry, keys: :unique, name: Meridian.Runs.Registry},
       {DynamicSupervisor, name: Meridian.Runs.Supervisor, strategy: :one_for_one},
       # After the run supervisor, so on shutdown Oban stops (and stops taking runs) first.

@@ -8,11 +8,11 @@ defmodule MeridianWeb.Admin.ExtensionLive.Index do
     counts = Personas.count_by_extension()
 
     extensions =
-      Enum.map(Extensions.installed(), fn module ->
+      Enum.map(Extensions.list_extensions(), fn extension ->
         %{
-          name: module.name(),
-          description: Extensions.description(module),
-          personas: Map.get(counts, module.name(), 0)
+          extension: extension,
+          description: Extensions.description(extension),
+          personas: Map.get(counts, extension.id, 0)
         }
       end)
 
@@ -26,15 +26,28 @@ defmodule MeridianWeb.Admin.ExtensionLive.Index do
       <.header>
         Extensions
         <:subtitle>
-          Installed in this deployment (<code>config :meridian, :extensions</code>). Each persona
-          turns them on for itself.
+          Lua scripts hooked into every run of the personas that turn them on. Global ones are for
+          everyone; users can also write their own.
         </:subtitle>
+        <:actions>
+          <.link navigate={~p"/admin/extensions/new"} class="btn btn-primary">New extension</.link>
+        </:actions>
       </.header>
 
-      <.table id="extensions" rows={@extensions} empty="No extensions installed.">
-        <:col :let={ext} label="Name"><code>{ext.name}</code></:col>
-        <:col :let={ext} label="Description">{ext.description}</:col>
-        <:col :let={ext} label="Enabled on">{personas_text(ext.personas)}</:col>
+      <.table id="extensions" rows={@extensions} empty="No extensions yet.">
+        <:col :let={row} label="Name">
+          <.link navigate={~p"/admin/extensions/#{row.extension}"}>
+            <code>{row.extension.name}</code>
+          </.link>
+        </:col>
+        <:col :let={row} label="Description">{row.description}</:col>
+        <:col :let={row} label="Belongs to">
+          <span :if={is_nil(row.extension.user)} class="badge">global</span>
+          <.link :if={row.extension.user} navigate={~p"/admin/users/#{row.extension.user}"}>
+            {row.extension.user.name}
+          </.link>
+        </:col>
+        <:col :let={row} label="Enabled on">{personas_text(row.personas)}</:col>
       </.table>
     </Layouts.app>
     """
