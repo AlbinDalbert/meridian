@@ -12,6 +12,8 @@ defmodule Meridian.Accounts.ApiKey.Policy do
 
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   @primary_key false
   embedded_schema do
     field :default_persona, :string

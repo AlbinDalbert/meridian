@@ -4,7 +4,6 @@ defmodule Meridian.Accounts do
   """
   import Ecto.Query
 
-  alias Ecto.Multi
   alias Meridian.Accounts.{ApiKey, User}
   alias Meridian.Personas
   alias Meridian.Repo
@@ -47,15 +46,19 @@ defmodule Meridian.Accounts do
         {:error, :persona, %{persona_changeset | action: :insert}}
 
       true ->
-        Multi.new()
-        |> Multi.insert(:user, user_changeset)
-        |> Multi.insert(:persona, fn %{user: user} ->
-          Ecto.Changeset.put_change(persona_changeset, :user_id, user.id)
+        Repo.transact(fn ->
+          with {:ok, user} <- Repo.insert(user_changeset),
+               {:ok, _persona} <-
+                 persona_changeset
+                 |> Ecto.Changeset.put_change(:user_id, user.id)
+                 |> Repo.insert() do
+            {:ok, user}
+          end
         end)
-        |> Repo.transact()
         |> case do
-          {:ok, %{user: user}} -> {:ok, user}
-          {:error, step, changeset, _changes} -> {:error, step, changeset}
+          {:ok, user} -> {:ok, user}
+          {:error, %Ecto.Changeset{data: %User{}} = changeset} -> {:error, :user, changeset}
+          {:error, changeset} -> {:error, :persona, changeset}
         end
     end
   end

@@ -249,8 +249,8 @@ defmodule Meridian.Runs.RunServer do
 
   defp add_delta(state, total_key, pending_key, text) when is_binary(text) and text != "" do
     state
-    |> Map.update!(total_key, &[&1 | text])
-    |> Map.update!(pending_key, &[&1 | text])
+    |> Map.update!(total_key, &[&1, text])
+    |> Map.update!(pending_key, &[&1, text])
   end
 
   defp add_delta(state, _total_key, _pending_key, _text), do: state

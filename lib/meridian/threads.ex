@@ -7,7 +7,6 @@ defmodule Meridian.Threads do
   """
   import Ecto.Query
 
-  alias Ecto.Multi
   alias Meridian.Accounts.ApiKey.Policy
   alias Meridian.Accounts.User
   alias Meridian.{Personas, Repo}
@@ -137,33 +136,41 @@ defmodule Meridian.Threads do
   def send_message(%Thread{} = thread, %Policy{} = policy, attrs) do
     slug = if thread.persona, do: thread.persona.slug
 
-    with {:ok, persona} <- Personas.resolve_persona(%User{id: thread.user_id}, policy, slug) do
-      Multi.new()
-      |> Multi.insert(:message, Message.user_changeset(%Message{thread_id: thread.id}, attrs))
-      |> Multi.insert(:run, fn %{message: message} ->
-        Run.create_changeset(%Run{}, %{
-          thread_id: thread.id,
-          user_message_id: message.id,
-          persona_snapshot: Persona.snapshot(persona),
-          model: persona.model
-        })
-      end)
-      |> Multi.update_all(:thread, from(t in Thread, where: t.id == ^thread.id),
-        set: [updated_at: DateTime.utc_now()]
-      )
-      |> Oban.insert(:job, fn %{run: run} -> Worker.new(%{run_id: run.id}) end)
-      |> Repo.transact()
-      |> case do
-        {:ok, %{message: message, run: run}} ->
-          Meridian.Runs.broadcast_run(run)
-          {:ok, message, run}
+    with {:ok, persona} <- Personas.resolve_persona(%User{id: thread.user_id}, policy, slug),
+         {:ok, {message, run}} <- insert_message_and_run(thread, persona, attrs) do
+      Meridian.Runs.broadcast_run(run)
+      {:ok, message, run}
+    end
+  end
 
-        {:error, :run, _changeset, _changes} ->
-          {:error, :run_active}
+  defp insert_message_and_run(thread, persona, attrs) do
+    Repo.transact(fn ->
+      with {:ok, message} <-
+             Repo.insert(Message.user_changeset(%Message{thread_id: thread.id}, attrs)),
+           {:ok, run} <- insert_run(thread, persona, message),
+           {:ok, _job} <- Oban.insert(Worker.new(%{run_id: run.id})) do
+        Repo.update_all(from(t in Thread, where: t.id == ^thread.id),
+          set: [updated_at: DateTime.utc_now()]
+        )
 
-        {:error, _step, changeset, _changes} ->
-          {:error, changeset}
+        {:ok, {message, run}}
       end
+    end)
+  end
+
+  # The only way inserting a valid run fails is the one-active-run-per-thread index.
+  defp insert_run(thread, persona, message) do
+    %Run{}
+    |> Run.create_changeset(%{
+      thread_id: thread.id,
+      user_message_id: message.id,
+      persona_snapshot: Persona.snapshot(persona),
+      model: persona.model
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, run} -> {:ok, run}
+      {:error, _changeset} -> {:error, :run_active}
     end
   end
 

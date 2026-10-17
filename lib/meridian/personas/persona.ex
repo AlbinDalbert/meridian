@@ -9,6 +9,8 @@ defmodule Meridian.Personas.Persona do
 
   @model_prefix "meridian/"
 
+  @type t :: %__MODULE__{}
+
   schema "personas" do
     field :slug, :string
     field :name, :string

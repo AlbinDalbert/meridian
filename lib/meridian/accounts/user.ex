@@ -7,6 +7,8 @@ defmodule Meridian.Accounts.User do
 
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   schema "users" do
     field :name, :string
     field :email, :string
