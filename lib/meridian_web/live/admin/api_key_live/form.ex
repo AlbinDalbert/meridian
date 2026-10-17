@@ -37,7 +37,7 @@ defmodule MeridianWeb.Admin.ApiKeyLive.Form do
   @impl true
   def render(%{minted: %ApiKey{}} = assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_path={@current_path}>
       <.header>
         API key minted
         <:subtitle>For {@user.name}: {@minted.name}</:subtitle>
@@ -59,7 +59,7 @@ defmodule MeridianWeb.Admin.ApiKeyLive.Form do
 
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_path={@current_path}>
       <.header>
         {@page_title}
         <:subtitle>For {@user.name}</:subtitle>
@@ -77,9 +77,9 @@ defmodule MeridianWeb.Admin.ApiKeyLive.Form do
           <.input
             field={policy[:allowed_personas]}
             type="checkgroup"
-            label="Allowed personas"
+            label="Allowed crew"
             options={@persona_options}
-            hint="None checked means all of the user's personas, including ones created later."
+            hint="None checked means the user's whole crew, including personas added later."
           />
           <.input
             field={policy[:default_persona]}

@@ -23,7 +23,7 @@ defmodule MeridianWeb.Me.PersonaLive.Form do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.me flash={@flash} current_user={@current_user}>
+    <Layouts.me flash={@flash} current_user={@current_user} current_path={@current_path}>
       <.header>{@page_title}</.header>
 
       <.live_component

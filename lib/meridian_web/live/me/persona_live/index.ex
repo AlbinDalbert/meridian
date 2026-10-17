@@ -6,7 +6,7 @@ defmodule MeridianWeb.Me.PersonaLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, socket |> assign(page_title: "Personas") |> load_personas()}
+    {:ok, socket |> assign(page_title: "Crew") |> load_personas()}
   end
 
   defp load_personas(socket) do
@@ -16,7 +16,7 @@ defmodule MeridianWeb.Me.PersonaLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.me flash={@flash} current_user={@current_user}>
+    <Layouts.me flash={@flash} current_user={@current_user} current_path={@current_path}>
       <.header>
         Your crew
         <:subtitle>

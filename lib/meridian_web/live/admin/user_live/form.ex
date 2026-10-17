@@ -37,7 +37,7 @@ defmodule MeridianWeb.Admin.UserLive.Form do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_path={@current_path}>
       <.header>
         {@page_title}
         <:subtitle :if={@live_action == :new}>

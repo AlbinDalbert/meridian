@@ -11,10 +11,10 @@ defmodule MeridianWeb.Admin.UserLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_path={@current_path}>
       <.header>
         Users
-        <:subtitle>Users own personas and API keys. Clients act as a user via one of their keys.</:subtitle>
+        <:subtitle>Users own a crew and API keys. Clients act as a user via one of their keys.</:subtitle>
         <:actions>
           <.link navigate={~p"/admin/users/new"} class="btn btn-primary">New user</.link>
         </:actions>

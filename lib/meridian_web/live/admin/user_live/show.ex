@@ -28,7 +28,7 @@ defmodule MeridianWeb.Admin.UserLive.Show do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_path={@current_path}>
       <.header>
         {@user.name}
         <:subtitle>{@user.email}</:subtitle>
@@ -38,7 +38,7 @@ defmodule MeridianWeb.Admin.UserLive.Show do
             type="button"
             variant="danger"
             phx-click="delete_user"
-            data-confirm={"Delete #{@user.name} along with their personas and API keys?"}
+            data-confirm={"Delete #{@user.name} along with their crew and API keys?"}
           >
             Delete
           </.button>
@@ -58,7 +58,7 @@ defmodule MeridianWeb.Admin.UserLive.Show do
       </p>
 
       <.header level={2}>
-        Personas
+        Crew
         <:subtitle>Clients pick a persona by using its model id.</:subtitle>
         <:actions>
           <.link navigate={~p"/admin/users/#{@user}/personas/new"} class="btn btn-secondary">
@@ -159,7 +159,7 @@ defmodule MeridianWeb.Admin.UserLive.Show do
   end
 
   defp policy_summary(%Policy{default_persona: default, allowed_personas: allowed}) do
-    allowed_text = if allowed == [], do: "all personas", else: Enum.join(allowed, ", ")
+    allowed_text = if allowed == [], do: "the whole crew", else: Enum.join(allowed, ", ")
     default_text = if default, do: "; default #{default}", else: ""
     allowed_text <> default_text
   end

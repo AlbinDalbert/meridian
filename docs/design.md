@@ -168,6 +168,16 @@ A future option is to also expose this surface as the **OpenAI Responses API**
 A small **LiveView** app mounted at `/admin`, inside the same release. It is an operator console,
 not a chat client.
 
+Navigation is a sidebar in two groups. **Operate** is the console's own: users, access
+requests, runs. **Configure** is the group `/me` has too: the crew (every user's personas, at
+`/admin/crew`), skills, MCPs, and extensions (installed extensions and how many personas enable
+each). The pages behind an entry differ between the two areas, but the entries match, so the
+console reads as `/me` plus operating. Skills and MCPs are listed as "soon" until they exist.
+
+**Crew** is what the UI calls a set of personas (a user's personas, the personas a key allows),
+however many there are, zero and one included. A single persona is still a persona. The code
+and the APIs keep `persona`/`personas`.
+
 - **Manage**: users, API keys (mint / revoke), personas.
 - **Observe**: how Meridian is used, **never what is said**. Per user: how many threads,
   messages, and runs, the tokens used, and when they were last active. Per run: who, status,
@@ -226,6 +236,8 @@ still no signup.
   same reason `/admin` does.
 - Personas are loaded through `Personas.get_persona!(user, id)`, so another user's id is a 404.
 - Browser apps find it as `account_url` in `GET /api/auth/session`.
+- The sidebar has the admin console's **Configure** group: crew (`/me`), skills and MCPs
+  (soon), and extensions (`/me/extensions`: what's installed and which of your personas use it).
 - *Later:* self-service API keys, browsing your own threads.
 
 ### Access requests (`/me/request`)
@@ -236,7 +248,7 @@ like xebec's login (its own `public.css`) and is on whenever `/me` is. The admin
 the same front-door look and mark (`MeridianWeb.BrandComponents`) in the console's green, so
 the two can't be mistaken for each other. The same split runs through the rest: the admin
 console is green (following the system's light or dark), and `/me`, its sign-in page
-included, is xebec's amber. Both top bars carry the mark.
+included, is xebec's amber. Both sidebars carry the mark.
 
 - A valid email always gets the same "request sent" answer, whether it already has a user, a
   request, or neither, so the page doesn't reveal who has access. Emails that have a user are
@@ -761,6 +773,8 @@ Add an entry whenever a decision is made or reversed.
 | **Asking again bumps the existing request; it keeps its status** | Ignoring repeats; a row per request; un-snoozing or un-rejecting on a repeat | No duplicates in the list, but the operator still sees that someone asked again, and when. An upsert on the email index makes it one statement, so simultaneous requests can't make two rows. Repeats don't undo the operator's snooze or reject. |
 | **Snooze just moves a request to "Later"** | Snoozing for a set time | It means "I'll look at this later"; a timer would decide "later" for the operator. |
 | **Accepting asks for the default persona's model once, at the top of the requests page** | A model field per card; going through the new-user form | Every user needs a default persona with a model; one page-level choice (prefilled with the newest user's model) keeps accepting to one click. |
+| **Navigation is a sidebar; the admin console's is `/me`'s plus an "Operate" group above it** (users, requests, runs over crew, skills, MCPs, extensions) | Top-bar links; separate, unrelated menus per area | The list is outgrowing a top bar. Giving both areas the same lower group keeps them recognisably the same product, while each shows what it should on those pages (the console: everyone's; `/me`: yours). Unbuilt entries show as "soon" rather than empty pages. |
+| **The UI calls a set of personas a "crew"**, for any number of them, zero and one included; one is still a persona. Code and APIs keep `persona` | Switching between "persona" and "crew" by count; renaming the API and schema | A fixed word for the set reads consistently. Renaming endpoints (`/api/personas`) would break clients for a label. |
 
 ## Open questions
 

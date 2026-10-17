@@ -103,7 +103,7 @@ defmodule MeridianWeb.Router do
 
     get "/", RedirectController, :users
 
-    live_session :admin, on_mount: {MeridianWeb.AdminAuth, :require_admin} do
+    live_session :admin, on_mount: [{MeridianWeb.AdminAuth, :require_admin}, MeridianWeb.Nav] do
       live "/users", UserLive.Index, :index
       live "/requests", AccessRequestLive.Index, :index
       live "/users/new", UserLive.Form, :new
@@ -115,6 +115,8 @@ defmodule MeridianWeb.Router do
       live "/personas/:id/edit", PersonaLive.Form, :edit
       live "/runs", RunLive.Index, :index
       live "/runs/:id", RunLive.Show, :show
+      live "/crew", CrewLive.Index, :index
+      live "/extensions", ExtensionLive.Index, :index
     end
   end
 
@@ -132,10 +134,11 @@ defmodule MeridianWeb.Router do
   scope "/me", MeridianWeb.Me do
     pipe_through [:me, :require_user]
 
-    live_session :me, on_mount: {MeridianWeb.MeAuth, :require_user} do
+    live_session :me, on_mount: [{MeridianWeb.MeAuth, :require_user}, MeridianWeb.Nav] do
       live "/", PersonaLive.Index, :index
       live "/personas/new", PersonaLive.Form, :new
       live "/personas/:id/edit", PersonaLive.Form, :edit
+      live "/extensions", ExtensionLive.Index, :index
     end
   end
 end

@@ -197,4 +197,26 @@ defmodule MeridianWeb.Admin.AdminLiveTest do
     lv |> element("#personas button", "Delete") |> render_click()
     assert Personas.get_persona_by_slug(user, "default") == nil
   end
+
+  test "the crew page lists every user's personas", %{conn: conn} do
+    ada = user_fixture(%{"name" => "Ada"})
+    persona_fixture(ada, %{"slug" => "coder", "extensions" => %{"datetime" => %{}}})
+    persona_fixture(user_fixture(%{"name" => "Bob"}), %{"slug" => "writer"})
+
+    {:ok, lv, html} = live(conn, ~p"/admin/crew")
+    assert html =~ "meridian/coder"
+    assert html =~ "meridian/writer"
+    assert lv |> element("#crew a", "Ada") |> has_element?()
+    assert lv |> element(".sidebar a.active", "Crew") |> has_element?()
+  end
+
+  test "the extensions page counts the personas that enable each one", %{conn: conn} do
+    user = user_fixture()
+    persona_fixture(user, %{"extensions" => %{"datetime" => %{}}})
+    persona_fixture(user, %{"extensions" => %{"datetime" => %{}, "gone" => %{}}})
+
+    {:ok, lv, _html} = live(conn, ~p"/admin/extensions")
+    assert lv |> element("#extensions tr", "datetime") |> render() =~ "2 personas"
+    assert lv |> element("#extensions tr", "title") |> render() =~ "0 personas"
+  end
 end

@@ -94,57 +94,137 @@ defmodule MeridianWeb.Layouts do
     """
   end
 
-  @doc "The admin page frame: navigation, flash, content."
+  @doc "The admin page frame: sidebar, flash, content."
   attr :flash, :map, required: true
-  attr :signed_in, :boolean, default: true
+  attr :current_path, :string, default: nil
   slot :inner_block, required: true
 
   def app(assigns) do
     ~H"""
-    <nav class="topbar">
-      <a href={~p"/admin/users"} class="brand">
-        <.mark size={22} /><span class="brand-word">MERIDIAN</span>
-        <span class="brand-area">admin</span>
-      </a>
-      <.link :if={@signed_in} navigate={~p"/admin/users"}>Users</.link>
-      <.link :if={@signed_in} navigate={~p"/admin/requests"}>Requests</.link>
-      <.link :if={@signed_in} navigate={~p"/admin/runs"}>Runs</.link>
-      <.form :if={@signed_in} for={%{}} action={~p"/admin/logout"} method="post" class="logout">
-        <button type="submit" class="link">Log out</button>
-      </.form>
-    </nav>
-    <main>
-      <.flash_group flash={@flash} />
-      {render_slot(@inner_block)}
-    </main>
+    <div class="shell">
+      <.sidebar
+        home={~p"/admin/users"}
+        area="admin"
+        sections={admin_sections()}
+        current_path={@current_path}
+      >
+        <:footer>
+          <.form for={%{}} action={~p"/admin/logout"} method="post">
+            <button type="submit" class="link">Log out</button>
+          </.form>
+        </:footer>
+      </.sidebar>
+      <main>
+        <.flash_group flash={@flash} />
+        {render_slot(@inner_block)}
+      </main>
+    </div>
     """
   end
 
   @doc "The `/me` page frame. Without `current_user`, nobody is signed in."
   attr :flash, :map, required: true
   attr :current_user, :map, default: nil
+  attr :current_path, :string, default: nil
   slot :inner_block, required: true
 
   def me(assigns) do
     ~H"""
-    <nav class="topbar">
-      <a href={~p"/me"} class="brand"><.mark size={22} /><span class="brand-word">MERIDIAN</span></a>
-      <.link :if={@current_user} navigate={~p"/me"}>Crew</.link>
-      <span :if={@current_user} class="muted topbar-user">{@current_user.email}</span>
-      <.form
-        :if={@current_user}
-        for={%{}}
-        action={~p"/me/logout"}
-        method="post"
-        class="logout"
+    <div class="shell">
+      <.sidebar
+        home={~p"/me"}
+        sections={if @current_user, do: me_sections(), else: []}
+        current_path={@current_path}
       >
-        <button type="submit" class="link">Log out</button>
-      </.form>
-    </nav>
-    <main>
-      <.flash_group flash={@flash} />
-      {render_slot(@inner_block)}
-    </main>
+        <:footer :if={@current_user}>
+          <span class="muted sidebar-user">{@current_user.email}</span>
+          <.form for={%{}} action={~p"/me/logout"} method="post">
+            <button type="submit" class="link">Log out</button>
+          </.form>
+        </:footer>
+      </.sidebar>
+      <main>
+        <.flash_group flash={@flash} />
+        {render_slot(@inner_block)}
+      </main>
+    </div>
     """
   end
+
+  # The sidebar's groups. The admin console has its own (operating the instance) above the one
+  # it shares with /me: the crew and what it can use. Pages differ between the two, but the
+  # entries are the same. `match` lists path prefixes that also count as being on that page;
+  # entries without `to` aren't built yet.
+  defp admin_sections do
+    [
+      {"Operate",
+       [
+         %{label: "Users", to: ~p"/admin/users", match: ["/admin/users/", "/admin/keys/"]},
+         %{label: "Requests", to: ~p"/admin/requests"},
+         %{label: "Runs", to: ~p"/admin/runs", match: ["/admin/runs/"]}
+       ]},
+      {"Configure",
+       configure_items(%{
+         crew: {~p"/admin/crew", ["/admin/personas/"]},
+         extensions: ~p"/admin/extensions"
+       })}
+    ]
+  end
+
+  defp me_sections do
+    [
+      {"Configure",
+       configure_items(%{crew: {~p"/me", ["/me/personas/"]}, extensions: ~p"/me/extensions"})}
+    ]
+  end
+
+  defp configure_items(%{crew: {crew, crew_match}, extensions: extensions}) do
+    [
+      %{label: "Crew", to: crew, match: crew_match},
+      %{label: "Skills"},
+      %{label: "MCPs"},
+      %{label: "Extensions", to: extensions}
+    ]
+  end
+
+  attr :home, :string, required: true
+  attr :area, :string, default: nil
+  attr :sections, :list, required: true
+  attr :current_path, :string, default: nil
+  slot :footer
+
+  defp sidebar(assigns) do
+    ~H"""
+    <aside class="sidebar">
+      <a href={@home} class="brand">
+        <.mark size={22} /><span class="brand-word">MERIDIAN</span>
+        <span :if={@area} class="brand-area">{@area}</span>
+      </a>
+      <nav>
+        <div :for={{label, items} <- @sections} class="nav-section">
+          <p class="nav-label">{label}</p>
+          <%= for item <- items do %>
+            <.link
+              :if={item[:to]}
+              navigate={item.to}
+              class={["nav-item", active?(item, @current_path) && "active"]}
+              aria-current={active?(item, @current_path) && "page"}
+            >
+              {item.label}
+            </.link>
+            <span :if={!item[:to]} class="nav-item disabled">
+              {item.label} <span class="badge">soon</span>
+            </span>
+          <% end %>
+        </div>
+      </nav>
+      <div :for={footer <- @footer} class="sidebar-footer">{render_slot(footer)}</div>
+    </aside>
+    """
+  end
+
+  defp active?(_item, nil), do: false
+
+  defp active?(item, path),
+    do: path == item.to or Enum.any?(Map.get(item, :match, []), &String.starts_with?(path, &1))
 end

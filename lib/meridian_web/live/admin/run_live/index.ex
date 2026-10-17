@@ -19,7 +19,7 @@ defmodule MeridianWeb.Admin.RunLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_path={@current_path}>
       <.header>
         Runs
         <:subtitle>The {length(@runs)} most recent runs across all users. Updates live.</:subtitle>

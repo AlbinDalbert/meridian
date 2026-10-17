@@ -75,4 +75,22 @@ defmodule MeridianWeb.Me.MeLiveTest do
     lv |> element("#personas button", "Delete") |> render_click()
     assert Personas.get_persona_by_slug(user, "default") == nil
   end
+
+  test "the sidebar marks the current page", %{conn: conn} do
+    stub_upstream_models(["qwen"])
+    {:ok, lv, _html} = live(conn, ~p"/me/personas/new")
+    assert lv |> element(".sidebar a.active", "Crew") |> has_element?()
+    assert lv |> element(".sidebar .disabled", "Skills") |> has_element?()
+  end
+
+  test "extensions show which of the user's crew use them", %{conn: conn, user: user} do
+    persona_fixture(user, %{"name" => "Clock", "extensions" => %{"datetime" => %{}}})
+    persona_fixture(user_fixture(), %{"name" => "Theirs", "extensions" => %{"title" => %{}}})
+
+    {:ok, lv, html} = live(conn, ~p"/me/extensions")
+    assert html =~ "Adds the current date and time"
+    assert lv |> element("#extensions a", "Clock") |> has_element?()
+    refute html =~ "Theirs"
+    assert lv |> element(".sidebar a.active", "Extensions") |> has_element?()
+  end
 end

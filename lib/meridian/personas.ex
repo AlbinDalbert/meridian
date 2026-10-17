@@ -21,6 +21,28 @@ defmodule Meridian.Personas do
     )
   end
 
+  @doc "Every user's personas, with their user, grouped by user."
+  def list_all_personas do
+    Repo.all(
+      from p in Persona,
+        join: u in assoc(p, :user),
+        order_by: [asc: u.name, asc: u.id, desc: p.is_default, asc: p.slug],
+        preload: [user: u]
+    )
+  end
+
+  @doc """
+  How many personas enable each extension, by extension name, installed or not. Extensions no
+  persona enables aren't in the map.
+  """
+  def count_by_extension do
+    Repo.all(
+      from p in Persona, select: fragment("ARRAY(SELECT jsonb_object_keys(?))", p.extensions)
+    )
+    |> List.flatten()
+    |> Enum.frequencies()
+  end
+
   def get_persona!(id), do: Repo.get!(Persona, id)
 
   @doc "Gets persona `id` if it belongs to `user`; raises `Ecto.NoResultsError` otherwise."
