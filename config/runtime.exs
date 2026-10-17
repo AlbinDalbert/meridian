@@ -7,6 +7,31 @@ import Config
 # any compile-time configuration in here, as it won't be applied.
 # The block below contains prod specific runtime configuration.
 
+# In development, load `.env` (see example.env) into the environment, so `mix phx.server` picks
+# it up without exporting anything first. Variables already set in the shell win, so one-off
+# overrides like `PORT=4001 mix phx.server` still work. Releases and tests never read it.
+# Format: `KEY=value` lines; blank lines, `#` comments, and an `export ` prefix are allowed,
+# and a value may be wrapped in single or double quotes.
+if config_env() == :dev and File.exists?(".env") do
+  for line <- File.stream!(".env"),
+      line = String.trim(line),
+      line != "" and not String.starts_with?(line, "#"),
+      [key, value] <- [
+        line |> String.replace_prefix("export ", "") |> String.split("=", parts: 2)
+      ],
+      key = String.trim(key),
+      is_nil(System.get_env(key)) do
+    value =
+      case String.trim(value) do
+        "\"" <> rest -> String.trim_trailing(rest, "\"")
+        "'" <> rest -> String.trim_trailing(rest, "'")
+        value -> value
+      end
+
+    System.put_env(key, value)
+  end
+end
+
 # ## Using releases
 #
 # If you use `mix release`, you need to explicitly enable the server

@@ -29,11 +29,11 @@ mix phx.server         # http://localhost:4000
 mix test
 ```
 
-To use it locally, point it at an upstream and set an admin token:
+To use it locally, point it at an upstream and set an admin token. `example.env` lists every
+variable, with values for a local [Ollama](https://ollama.com):
 
 ```sh
-export LLM_BASE_URL=http://localhost:8080/v1          # any OpenAI-compatible endpoint
-export ADMIN_TOKEN=$(openssl rand -base64 48)
+cp example.env .env   # gitignored; edit as needed. Read automatically in development
 mix phx.server
 ```
 
