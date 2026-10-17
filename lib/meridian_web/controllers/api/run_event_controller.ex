@@ -27,10 +27,13 @@ defmodule MeridianWeb.Api.RunEventController do
     with %{} = run <- Runs.get_user_run(conn.assigns.current_user, id),
          {:ok, after_seq} <- cursor(conn, params) do
       :ok = Runs.subscribe(run)
+      # Check the status after subscribing (a run that finishes from here on is seen live) and
+      # before listing events: the terminal event is saved together with the final status, so
+      # if the run had finished, the list has every event the client is missing.
+      finished? = Run.finished?(Runs.get_run!(run.id))
       events = Runs.list_events(run, after_seq)
 
-      # Reload after subscribing: a run that finishes from here on is seen live.
-      if events == [] and Run.finished?(Runs.get_run!(run.id)) do
+      if events == [] and finished? do
         send_resp(conn, :no_content, "")
       else
         stream(conn, events, after_seq)

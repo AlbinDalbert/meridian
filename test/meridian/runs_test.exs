@@ -163,6 +163,56 @@ defmodule Meridian.RunsTest do
     assert event_types(run) == ~w(run.started message.delta run.failed)
   end
 
+  describe "an upstream stream that doesn't finish" do
+    test "fails the run if the body ends before the model does", %{thread: thread} do
+      {_message, run} = message_fixture(thread)
+      stub_upstream_stream([~s(data: {"choices":[{"delta":{"content":"Trunc"}}]}\n\n)])
+
+      :ok = execute(run)
+
+      run = Runs.get_run!(run.id)
+      assert run.status == :failed
+      assert run.error["code"] == "upstream_incomplete"
+      assert event_types(run) == ~w(run.started message.delta run.failed)
+      assert [_user] = Threads.list_all_messages(thread)
+    end
+
+    test "fails the run on [DONE] without a finish reason", %{thread: thread} do
+      {_message, run} = message_fixture(thread)
+
+      stub_upstream_stream([
+        ~s(data: {"choices":[{"delta":{"content":"Trunc"}}]}\n\n),
+        "data: [DONE]\n\n"
+      ])
+
+      :ok = execute(run)
+
+      assert %Run{status: :failed, error: %{"code" => "upstream_incomplete"}} =
+               Runs.get_run!(run.id)
+    end
+
+    test "fails the run on an event that isn't valid JSON", %{thread: thread} do
+      {_message, run} = message_fixture(thread)
+
+      stub_upstream_stream(["data: {not json\n\n" | completion_events(["ok"])])
+
+      :ok = execute(run)
+
+      assert %Run{status: :failed, error: %{"code" => "upstream_error"}} = Runs.get_run!(run.id)
+      assert [_user] = Threads.list_all_messages(thread)
+    end
+
+    test "completes without [DONE] if the model finished", %{thread: thread} do
+      {_message, run} = message_fixture(thread)
+      stub_upstream_stream(completion_events(["ok"]) |> List.delete("data: [DONE]\n\n"))
+
+      :ok = execute(run)
+
+      assert Runs.get_run!(run.id).status == :completed
+      assert [_user, %{content: [%{"text" => "ok"}]}] = Threads.list_all_messages(thread)
+    end
+  end
+
   test "an unreachable upstream fails the run", %{thread: thread} do
     {_message, run} = message_fixture(thread)
     stub_upstream_down()
@@ -199,28 +249,30 @@ defmodule Meridian.RunsTest do
       refute_received {:upstream_request, _body}
     end
 
-    test "stops a running run", %{thread: thread} do
+    test "stops a running run, even while the upstream hasn't responded", %{thread: thread} do
       {_message, run} = message_fixture(thread)
       test_pid = self()
 
-      Req.Test.stub(Meridian.Upstream, fn conn ->
+      # An upstream that never sends response headers.
+      Req.Test.stub(Meridian.Upstream, fn _conn ->
         send(test_pid, {:upstream_called, self()})
-        assert_receive :continue
 
-        conn
-        |> Plug.Conn.put_resp_content_type("text/event-stream")
-        |> Plug.Conn.send_resp(200, Enum.join(completion_events(["never seen"])))
+        receive do
+          :never -> :ok
+        end
       end)
 
       task = Task.async(fn -> execute(run) end)
-      assert_receive {:upstream_called, server_pid}
+      assert_receive {:upstream_called, request_pid}
+      request_ref = Process.monitor(request_pid)
 
-      # The cancel request reaches the RunServer before any of the response does.
       run = Runs.get_run!(run.id)
       assert run.status == :running
       assert {:ok, _run} = Runs.cancel_run(run)
-      send(server_pid, :continue)
       assert :ok = Task.await(task)
+
+      # The upstream request was abandoned.
+      assert_receive {:DOWN, ^request_ref, :process, ^request_pid, :killed}
 
       assert Runs.get_run!(run.id).status == :cancelled
       assert event_types(run) == ~w(run.started run.cancelled)

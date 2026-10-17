@@ -5,8 +5,13 @@ defmodule Meridian.Runs.RunServer do
 
   The run is a single model call for now: build the context from the thread's history, apply
   the persona snapshot, stream the completion from the upstream, and save the reply. The
-  upstream response is streamed into this process's mailbox (`into: :self`), so cancel
-  requests, timers, and response chunks are all just messages.
+  request runs in a separate process (`Meridian.Upstream.Stream`) that forwards the response
+  here, so cancel requests, timers, and response chunks are all just messages, and this
+  process never blocks waiting for the upstream.
+
+  A reply is only saved as completed if the upstream said the model finished (a
+  `finish_reason`). A stream that ends without one, or that contains an event that isn't
+  valid JSON, fails the run instead of saving a truncated reply.
 
   Text and reasoning deltas are buffered and emitted as one `message.delta` event per
   `:delta_flush_interval` (milliseconds; `0` emits one event per upstream chunk), so the event
@@ -61,7 +66,7 @@ defmodule Meridian.Runs.RunServer do
       run_id: run_id,
       run: nil,
       seq: 0,
-      resp: nil,
+      stream: nil,
       sse: SSE.new(),
       # Everything received so far, and what hasn't been emitted as a delta yet (iodata).
       text: [],
@@ -94,34 +99,8 @@ defmodule Meridian.Runs.RunServer do
   end
 
   defp request(state) do
-    case Upstream.chat_completions(request_body(state.run)) do
-      {:ok, %Req.Response{status: 200} = resp} ->
-        {:noreply, reset_idle_timer(%{state | resp: resp})}
-
-      {:ok, %Req.Response{} = resp} ->
-        body = resp.body |> Enum.join() |> String.slice(0, 2000)
-        Logger.warning("Upstream responded #{resp.status}: #{body}")
-
-        fail(state, %{
-          "code" => "upstream_error",
-          "message" => upstream_error_message(body, resp.status),
-          "status" => resp.status
-        })
-
-      {:error, :not_configured} ->
-        fail(state, %{
-          "code" => "upstream_not_configured",
-          "message" => "No upstream is configured."
-        })
-
-      {:error, reason} ->
-        Logger.warning("Upstream request failed: #{inspect(reason)}")
-
-        fail(state, %{
-          "code" => "upstream_unavailable",
-          "message" => "The upstream is unavailable."
-        })
-    end
+    {:ok, stream} = Upstream.Stream.start_link(request_body(state.run))
+    {:noreply, reset_idle_timer(%{state | stream: stream})}
   end
 
   defp request_body(%Run{} = run) do
@@ -141,7 +120,6 @@ defmodule Meridian.Runs.RunServer do
 
   @impl true
   def handle_info({:cancel_run, run_id}, %{run_id: run_id} = state) do
-    cancel_response(state)
     finish(state, :cancelled)
   end
 
@@ -154,47 +132,70 @@ defmodule Meridian.Runs.RunServer do
 
       {:error, :not_running} ->
         # Someone else ended the run (e.g. the janitor); there's nothing left to do.
-        cancel_response(state)
         {:stop, :normal, %{state | run: nil}}
     end
   end
 
   def handle_info(:idle_timeout, state) do
-    cancel_response(state)
-
     fail(state, %{
       "code" => "upstream_timeout",
       "message" => "The upstream stopped sending data."
     })
   end
 
-  def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
+  def handle_info({:upstream, stream, message}, %{stream: stream} = state) do
+    handle_upstream(message, state)
+  end
 
-  def handle_info(message, %{resp: %Req.Response{} = resp} = state) do
-    case Req.parse_message(resp, message) do
-      {:ok, items} ->
-        handle_items(items, reset_idle_timer(state))
+  def handle_info({:EXIT, stream, reason}, %{stream: stream} = state) when reason != :normal do
+    Logger.error("Upstream stream crashed: #{inspect(reason)}")
 
-      {:error, reason} ->
-        Logger.warning("Upstream stream failed: #{inspect(reason)}")
-        fail(state, %{"code" => "upstream_error", "message" => "The upstream stream failed."})
-
-      :unknown ->
-        {:noreply, state}
-    end
+    fail(%{state | stream: nil}, %{
+      "code" => "upstream_error",
+      "message" => "The upstream stream failed."
+    })
   end
 
   def handle_info(_message, state), do: {:noreply, state}
 
+  defp handle_upstream({:items, items}, state), do: handle_items(items, reset_idle_timer(state))
+
+  defp handle_upstream({:error_response, status, body}, state) do
+    body = String.slice(body, 0, 2000)
+    Logger.warning("Upstream responded #{status}: #{body}")
+
+    fail(state, %{
+      "code" => "upstream_error",
+      "message" => upstream_error_message(body, status),
+      "status" => status
+    })
+  end
+
+  defp handle_upstream({:request_failed, :not_configured}, state) do
+    fail(state, %{"code" => "upstream_not_configured", "message" => "No upstream is configured."})
+  end
+
+  defp handle_upstream({:request_failed, reason}, state) do
+    Logger.warning("Upstream request failed: #{inspect(reason)}")
+    fail(state, %{"code" => "upstream_unavailable", "message" => "The upstream is unavailable."})
+  end
+
+  defp handle_upstream({:stream_failed, reason}, state) do
+    Logger.warning("Upstream stream failed: #{inspect(reason)}")
+    fail(state, %{"code" => "upstream_error", "message" => "The upstream stream failed."})
+  end
+
   defp handle_items([], state), do: {:noreply, state}
-  defp handle_items([:done | _rest], state), do: finish(state, :completed)
+  # The response body ended. Without a [DONE] event first, this is only a success if the
+  # model said it finished.
+  defp handle_items([:done | _rest], state), do: complete(state)
 
   defp handle_items([{:data, chunk} | rest], state) do
     {events, sse} = SSE.parse(state.sse, chunk)
 
     case handle_events(events, %{state | sse: sse}) do
       {:cont, state} -> handle_items(rest, state)
-      {:done, state} -> finish(state, :completed)
+      {:done, state} -> complete(state)
       {:error, error, state} -> fail(state, error)
     end
   end
@@ -214,8 +215,10 @@ defmodule Meridian.Runs.RunServer do
         handle_events(rest, handle_chunk(chunk, state))
 
       _ ->
-        Logger.warning("Ignoring unparseable upstream event: #{String.slice(data, 0, 200)}")
-        handle_events(rest, state)
+        Logger.warning("Unparseable upstream event: #{String.slice(data, 0, 200)}")
+
+        {:error,
+         %{"code" => "upstream_error", "message" => "The upstream sent an invalid event."}, state}
     end
   end
 
@@ -294,6 +297,17 @@ defmodule Meridian.Runs.RunServer do
 
   ## Finishing
 
+  # The upstream stream ended ([DONE] or end of body). Only a model that reported why it
+  # stopped has finished its reply; anything else is a truncated stream.
+  defp complete(%{finish_reason: nil} = state) do
+    fail(state, %{
+      "code" => "upstream_incomplete",
+      "message" => "The upstream ended the response before the model finished."
+    })
+  end
+
+  defp complete(state), do: finish(state, :completed)
+
   defp finish(state, status) do
     state = flush(state)
     text = IO.iodata_to_binary(state.text)
@@ -330,17 +344,18 @@ defmodule Meridian.Runs.RunServer do
   @impl true
   def terminate(reason, %{run: %Run{} = run} = state) when reason != :normal do
     # Crashed or shut down mid-run: don't leave the run (and its thread) hanging.
-    cancel_response(state)
+    cancel_stream(state)
     error = %{"code" => "interrupted", "message" => "The run was interrupted."}
     Runs.finish_run(run, :failed, error: error)
   rescue
     e -> Logger.error("Could not fail interrupted run: #{Exception.message(e)}")
   end
 
-  def terminate(_reason, _state), do: :ok
+  # However the run ended, close the upstream connection if it is still open.
+  def terminate(_reason, state), do: cancel_stream(state)
 
-  defp cancel_response(%{resp: %Req.Response{} = resp}), do: Req.cancel_async_response(resp)
-  defp cancel_response(_state), do: :ok
+  defp cancel_stream(%{stream: stream}) when is_pid(stream), do: Upstream.Stream.cancel(stream)
+  defp cancel_stream(_state), do: :ok
 
   defp reset_idle_timer(state) do
     if state.idle_timer, do: Process.cancel_timer(state.idle_timer)

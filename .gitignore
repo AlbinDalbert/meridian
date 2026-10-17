@@ -30,3 +30,6 @@ meridian-*.tar
 .env
 .env.*
 .envrc
+
+# Local review notes
+ROAST.md
