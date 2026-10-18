@@ -64,7 +64,7 @@ persistence.
 | Route | Purpose |
 |---|---|
 | `GET /api/agents` | The user's agents |
-| `/api/threads` (CRUD) | Threads |
+| `/api/threads` (CRUD) | Threads; `GET ?tag=` filters by tag |
 | `GET/POST /api/threads/:id/messages` | History / send a message → `{message, run}` immediately |
 | `POST /api/threads/:id/fork` | Copy the thread with its messages `through` one (all if omitted) → the new thread |
 | `POST /api/threads/:id/truncate` | Delete the messages `after` one (and the runs of deleted user messages) |
@@ -229,7 +229,7 @@ UUIDv7 ids (monotonic), `utc_datetime_usec` timestamps.
 users            id, name, email, oidc_issuer?, oidc_subject?
 api_keys         id, user_id, name, prefix, token_hash, policy, last_used_at, revoked_at
 agents           id, user_id, slug, name, system_prompt, model, params, extensions, skills, is_default
-threads          id, user_id, agent_id, title
+threads          id, user_id, agent_id, title, tags
 messages         id, thread_id, run_id?, role, content (parts), tool_calls?, tool_call_id?, metadata, usage?
 runs             id, thread_id, user_message_id, status, agent_snapshot, usage, error?, heartbeat_at, ...
 run_events       run_id, seq, type, payload               -- PK (run_id, seq)
@@ -286,6 +286,8 @@ Current decisions only. Superseded ones are removed; git history has them.
 | No retry/resume; fail fast (3 layers) | Oban retries + checkpointed steps | Frees the thread instead of leaving it stuck. Resume needs `run_steps`. |
 | Partial replies kept on cancel | Discarding | The user saw that text. |
 | Fork, truncate, and reply as primitives; forks copy messages | Reroll/edit endpoints; reply variants in place; threads pointing at a parent | Three plain operations compose into reroll, edit, and branching. Copies keep history queries flat and branches independent of their origin. |
+| Threads have free-form `tags`; clients give them meaning | Pinned, archived, folder features | One generic list covers pinning, archiving, and grouping without a core change per feature. |
+| Editing a thread keeps its `updated_at` | Bumping it on every update | `updated_at` orders the list by activity; pinning or renaming shouldn't move a thread. |
 | Extensions are sandboxed Lua in the DB | Elixir modules, Deno, QuickJS, WASM | Edit-and-save without a deploy, safe for users to write, pure Elixir. Cost: no deps, slow interpreter. |
 | Script calls start from loaded state; cached by source hash | Live Lua state per extension | No leakage between users or runs, no cache invalidation. |
 | Timeout + heap cap + instruction budget per call | Timeout only | Deterministic failure for runaway loops; scripts can't grow the node. |

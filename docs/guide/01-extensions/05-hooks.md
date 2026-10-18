@@ -175,5 +175,5 @@ end
 
 ## `thread_created(thread, ctx)` and `thread_deleted(thread, ctx)`
 
-`thread` has `id`, `title` and `agent_id`. Observers. These aren't part of a run, so
+`thread` has `id`, `title`, `tags` and `agent_id`. Observers. These aren't part of a run, so
 `ctx.run_id` is `nil`, and `ctx.settings` comes from the agent as it is now.

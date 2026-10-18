@@ -10,8 +10,13 @@ defmodule MeridianWeb.Api.ThreadController do
 
   action_fallback MeridianWeb.Api.FallbackController
 
+  @doc "Lists threads; `?tag=pinned` (or `?tag[]=a&tag[]=b`) keeps the ones with all the tags."
   def index(conn, params) do
-    threads = Threads.list_threads(conn.assigns.current_user, limit: params["limit"])
+    tags = for tag <- List.wrap(params["tag"]), is_binary(tag), do: tag
+
+    threads =
+      Threads.list_threads(conn.assigns.current_user, limit: params["limit"], tags: tags)
+
     render(conn, :index, threads: threads)
   end
 

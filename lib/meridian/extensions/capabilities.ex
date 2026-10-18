@@ -8,7 +8,7 @@ defmodule Meridian.Extensions.Capabilities do
 
   Functions that can fail return `nil` and an error message, Lua style.
 
-    * `meridian.threads.get(id)` - a thread (`id`, `title`, `agent_id`, `created_at`), or nil
+    * `meridian.threads.get(id)` - a thread (`id`, `title`, `tags`, `agent_id`, `created_at`), or nil
     * `meridian.threads.messages(id)` - a thread's messages, oldest first (`id`, `role`,
       `text`, `created_at`), or nil
     * `meridian.threads.set_title(id, title, opts)` - sets a thread's title; with
@@ -125,6 +125,7 @@ defmodule Meridian.Extensions.Capabilities do
     %{
       "id" => thread.id,
       "title" => thread.title,
+      "tags" => thread.tags,
       "agent_id" => thread.agent_id,
       "created_at" => DateTime.to_iso8601(thread.inserted_at)
     }

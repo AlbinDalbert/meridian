@@ -87,6 +87,61 @@ defmodule MeridianWeb.ApiTest do
       assert conn |> get(~p"/api/threads/#{id}") |> json_response(404)
     end
 
+    test "have tags, which filter the list", %{conn: conn} do
+      assert %{"tags" => []} = create_thread(conn)
+      pinned = create_thread(conn, %{"tags" => ["pinned", " work ", "pinned", " "]})
+      assert pinned["tags"] == ["pinned", "work"]
+
+      list = fn query ->
+        conn |> get(~p"/api/threads?#{query}") |> json_response(200) |> Map.fetch!("data")
+      end
+
+      assert [%{"id" => id}] = list.(tag: "pinned")
+      assert id == pinned["id"]
+      assert [%{"id" => ^id}] = list.(tag: ["pinned", "work"])
+      assert [] = list.(tag: ["pinned", "other"])
+      assert length(list.(%{})) == 2
+
+      assert %{"data" => %{"tags" => []}} =
+               conn |> patch(~p"/api/threads/#{id}", %{"tags" => []}) |> json_response(200)
+
+      assert [] = list.(tag: "pinned")
+    end
+
+    test "reject invalid tags", %{conn: conn} do
+      for tags <- [[String.duplicate("a", 101)], Enum.map(1..51, &"t#{&1}"), [1], "pinned"] do
+        assert %{"error" => %{"message" => "tags " <> _}} =
+                 conn |> post(~p"/api/threads", %{"tags" => tags}) |> json_response(422)
+      end
+    end
+
+    test "keep their tags when forked", %{conn: conn} do
+      thread = create_thread(conn, %{"tags" => ["pinned"]})
+
+      assert %{"data" => %{"tags" => ["pinned"]}} =
+               conn |> post(~p"/api/threads/#{thread["id"]}/fork") |> json_response(201)
+    end
+
+    test "keep their place in the list when edited", %{conn: conn} do
+      older = create_thread(conn)
+      newer = create_thread(conn)
+
+      assert %{"data" => %{"updated_at" => updated_at}} =
+               conn
+               |> patch(~p"/api/threads/#{older["id"]}", %{
+                 "title" => "Renamed",
+                 "tags" => ["pinned"]
+               })
+               |> json_response(200)
+
+      assert updated_at == older["updated_at"]
+
+      assert [%{"id" => first}, _] =
+               conn |> get(~p"/api/threads") |> json_response(200) |> Map.fetch!("data")
+
+      assert first == newer["id"]
+    end
+
     test "accept an agent model id", %{conn: conn} do
       assert %{"agent" => "meridian/coder"} =
                create_thread(conn, %{"agent" => "meridian/coder"})

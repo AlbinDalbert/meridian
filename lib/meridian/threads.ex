@@ -61,15 +61,25 @@ defmodule Meridian.Threads do
     }
   end
 
-  @doc "A user's threads, most recently active first."
+  @doc """
+  A user's threads, most recently active first. With `tags: [...]`, only the threads that have
+  all of them.
+  """
   def list_threads(%User{id: user_id}, opts \\ []) do
-    Repo.all(
+    query =
       from t in Thread,
         where: t.user_id == ^user_id,
         order_by: [desc: t.updated_at],
         limit: ^page_size(opts[:limit]),
         preload: :agent
-    )
+
+    query =
+      case opts[:tags] do
+        [_ | _] = tags -> where(query, [t], fragment("? @> ?", t.tags, ^tags))
+        _ -> query
+      end
+
+    Repo.all(query)
   end
 
   @doc "Gets one of `user`'s threads (agent preloaded), or nil."
@@ -101,7 +111,10 @@ defmodule Meridian.Threads do
     end
   end
 
-  @doc "Updates a thread's title and, if `attrs[\"agent\"]` is given, its agent."
+  @doc """
+  Updates a thread's title and tags and, if `attrs[\"agent\"]` is given, its agent. The thread
+  keeps its `updated_at`: editing it isn't activity, so it doesn't move up the list.
+  """
   def update_thread(%Thread{} = thread, %Policy{} = policy, attrs) do
     agent =
       case Map.fetch(attrs, "agent") do
@@ -117,6 +130,7 @@ defmodule Meridian.Threads do
            thread
            |> Thread.changeset(attrs)
            |> Ecto.Changeset.put_change(:agent_id, agent && agent.id)
+           |> Ecto.Changeset.force_change(:updated_at, thread.updated_at)
            |> Repo.update() do
       {:ok, %{thread | agent: agent}}
     end
@@ -159,7 +173,7 @@ defmodule Meridian.Threads do
   end
 
   @doc """
-  Copies a thread for its user, with the same title and agent and copies of its messages up to
+  Copies a thread for its user, with the same title, tags and agent and copies of its messages up to
   and including `through_id` (all of them if nil). The copies keep their content and times but
   belong to no run. Returns `{:error, :not_found}` if `through_id` isn't one of the thread's
   messages.
@@ -188,7 +202,8 @@ defmodule Meridian.Threads do
         Repo.insert!(%Thread{
           user_id: thread.user_id,
           agent_id: thread.agent_id,
-          title: thread.title
+          title: thread.title,
+          tags: thread.tags
         })
 
       for m <- messages do

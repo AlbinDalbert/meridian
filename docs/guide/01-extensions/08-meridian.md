@@ -21,8 +21,8 @@ local text = assert(meridian.model.complete({ messages = messages }))
 
 ## `meridian.threads.get(id)`
 
-A thread of this user: `id`, `title`, `agent_id`, `created_at` (ISO 8601 text). `nil` if it
-doesn't exist or isn't theirs.
+A thread of this user: `id`, `title`, `tags` (a list of strings), `agent_id`, `created_at`
+(ISO 8601 text). `nil` if it doesn't exist or isn't theirs.
 
 ## `meridian.threads.messages(id)`
 

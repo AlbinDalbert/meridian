@@ -531,7 +531,12 @@ defmodule Meridian.Extensions do
   end
 
   defp to_lua(_hook, %Thread{} = thread),
-    do: %{"id" => thread.id, "title" => thread.title, "agent_id" => thread.agent_id}
+    do: %{
+      "id" => thread.id,
+      "title" => thread.title,
+      "tags" => thread.tags,
+      "agent_id" => thread.agent_id
+    }
 
   defp to_lua(_hook, value), do: value
 

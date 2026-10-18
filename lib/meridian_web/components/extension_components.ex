@@ -188,7 +188,7 @@ defmodule MeridianWeb.ExtensionComponents do
           <code>error</code>. Queue a job for slow work.
         </dd>
         <dt><code>thread_created(thread, ctx)</code>, <code>thread_deleted(thread, ctx)</code></dt>
-        <dd><code>id</code>, <code>title</code>, <code>agent_id</code>.</dd>
+        <dd><code>id</code>, <code>title</code>, <code>tags</code>, <code>agent_id</code>.</dd>
       </dl>
 
       <h3>The <code>meridian</code> table</h3>
@@ -198,7 +198,7 @@ defmodule MeridianWeb.ExtensionComponents do
       </p>
       <dl class="details">
         <dt><code>meridian.threads.get(id)</code></dt>
-        <dd>A thread: <code>id</code>, <code>title</code>, <code>agent_id</code>, <code>created_at</code>.</dd>
+        <dd>A thread: <code>id</code>, <code>title</code>, <code>tags</code>, <code>agent_id</code>, <code>created_at</code>.</dd>
         <dt><code>meridian.threads.messages(id)</code></dt>
         <dd>Its messages, oldest first: <code>id</code>, <code>role</code>, <code>text</code>, <code>created_at</code>.</dd>
         <dt><code>{"meridian.threads.set_title(id, title, {only_if_untitled = true})"}</code></dt>

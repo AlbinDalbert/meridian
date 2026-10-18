@@ -14,6 +14,7 @@ defmodule MeridianWeb.Api.ThreadJSON do
     %{
       id: thread.id,
       title: thread.title,
+      tags: thread.tags,
       agent: thread.agent && Agent.model_id(thread.agent),
       inserted_at: thread.inserted_at,
       updated_at: thread.updated_at
