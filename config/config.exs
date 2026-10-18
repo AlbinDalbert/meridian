@@ -28,7 +28,11 @@ config :meridian, Oban,
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     # Jobs of a node that died are left "executing"; this discards them (runs aren't retried).
     {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(30)},
-    {Oban.Plugins.Cron, crontab: [{"* * * * *", Meridian.Runs.Janitor}]}
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"* * * * *", Meridian.Runs.Janitor},
+       {"0 * * * *", Meridian.Runs.EventPruner}
+     ]}
   ]
 
 # Run execution tuning (milliseconds). See Meridian.Runs.RunServer.
@@ -36,6 +40,8 @@ config :meridian, Meridian.Runs,
   delta_flush_interval: 100,
   heartbeat_interval: :timer.seconds(10),
   stale_after: :timer.seconds(60),
+  # Finished runs' message.delta events are deleted after this (Meridian.Runs.EventPruner).
+  delta_retention: :timer.hours(24),
   idle_timeout: :timer.minutes(5)
 
 # Configure the endpoint

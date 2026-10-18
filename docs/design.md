@@ -94,7 +94,9 @@ tool calls it asks for is a **step**.
 3. Everything is an **event** with a per-run `seq`: persisted to `run_events`, then broadcast
    on `run:<id>` and `thread:<id>`. Text deltas are coalesced (~100 ms) before both, so live
    and replaying clients see identical events. Types: `run.*`, `message.delta`,
-   `message.completed`, `tool_call.started`, `tool_call.completed`.
+   `message.completed`, `tool_call.started`, `tool_call.completed`. A day after a run
+   finishes, its `message.delta` events are deleted (`message.completed` has the same text),
+   so an old run replays without the streaming.
 4. Subscribers subscribe first, replay from Postgres, then drop live events already replayed.
 
 **Completion is strict:** a reply is saved as completed only if the upstream sent a
@@ -102,7 +104,8 @@ tool calls it asks for is a **step**.
 
 **Failure:** runs aren't retried or resumed. Three layers make sure no run is left hanging: the
 `RunServer` traps exits and fails the run in `terminate/2`; the worker fails it if the
-`RunServer` dies; a janitor fails runs whose heartbeat is older than 60 s (dead node).
+`RunServer` dies or can't start; a janitor fails runs whose heartbeat is older than 60 s (dead
+node), and queued runs whose job is gone.
 
 **Cancel** goes over PubSub (works across nodes). The partial reply is kept as the assistant
 message with `finish_reason: "cancelled"`.
@@ -274,6 +277,7 @@ Current decisions only. Superseded ones are removed; git history has them.
 | Timeout + heap cap + instruction budget per call | Timeout only | Deterministic failure for runaway loops; scripts can't grow the node. |
 | Every lifecycle hook exists, used or not | Hooks on demand | Extensions shouldn't need a core change first. |
 | Hooks are always awaited; jobs are the async path | A per-extension sync/async switch | Hooks see the run in order and may change it. Background work is a hook that enqueues a job: one way to do it. |
+| Deltas of finished runs are deleted after a day | Keeping every event | Deltas are most of `run_events` and repeat `message.completed`. Replaying a recent run stays exact. |
 | Hooks may call the model, with a 30 s limit like tools | Forbidding model calls in hooks; jobs only | Guardrails (e.g. a small model checking a tool call) must finish before the run goes on. The latency is the extension's choice. |
 | Extensions enabled per agent by id, off by default | Global enablement; by name | Per-user control; user and global extensions may share names. |
 | Tools are part of extensions; all-or-nothing enablement | Separate tool rows; per-tool switches | One feature = one script sharing code and settings. Optional parts are settings. |

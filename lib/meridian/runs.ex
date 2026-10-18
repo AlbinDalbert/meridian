@@ -15,6 +15,9 @@ defmodule Meridian.Runs do
   Ending a run (`finish_run/3`, however the run ends) fires the `run_end` hook of the
   extensions the run's agent enables.
 
+  Events are kept, except the `message.delta` events of runs that finished more than
+  `:delta_retention` ago (`prune_deltas/1`): the `message.completed` events hold the same text.
+
   Subscribers that need every event (SSE, the admin run view) subscribe first, then replay the
   persisted events with `list_events/2`, dropping live events they already replayed (by `seq`).
   """
@@ -268,19 +271,32 @@ defmodule Meridian.Runs do
   defp terminal_payload(%Run{status: :cancelled}), do: %{}
 
   @doc """
-  Fails runs whose RunServer stopped sending heartbeats (e.g. the node running it died), so
-  their threads are free again. Returns how many runs were failed.
+  Fails runs that nothing will ever finish, so their threads are free again:
+
+    * running runs whose RunServer stopped sending heartbeats (e.g. the node running it died)
+    * queued runs whose job is gone: no job waiting to run it, and none that started running
+      it within `stale_after_ms` (a job takes its run out of `queued` right after it starts,
+      so one still "executing" after that died with its node)
+
+  Returns how many runs were failed.
   """
   def fail_stale_runs(stale_after_ms \\ config(:stale_after, :timer.seconds(60))) do
     cutoff = DateTime.add(DateTime.utc_now(), -stale_after_ms, :millisecond)
 
     stale =
-      Repo.all(from r in Run, where: r.status == :running and r.heartbeat_at < ^cutoff, select: r)
+      Repo.all(
+        from r in Run,
+          as: :run,
+          where:
+            (r.status == :running and r.heartbeat_at < ^cutoff) or
+              (r.status == :queued and not exists(live_job(cutoff))),
+          select: r
+      )
 
     Enum.count(stale, fn run ->
       error = %{"code" => "interrupted", "message" => "The run was interrupted."}
 
-      case finish_run(run, :failed, error: error) do
+      case finish_run(run, :failed, from: [run.status], error: error) do
         {:ok, _run, _message} ->
           Logger.warning("Failed stale run #{run.id}")
           true
@@ -289,6 +305,37 @@ defmodule Meridian.Runs do
           false
       end
     end)
+  end
+
+  @doc """
+  Deletes the `message.delta` events of runs that finished more than `retention_ms` ago. Their
+  text is also in the `message.completed` events, so a client replaying an old run still gets
+  every message, just not streamed piece by piece. Returns how many events were deleted.
+  """
+  def prune_deltas(retention_ms \\ config(:delta_retention, :timer.hours(24))) do
+    cutoff = DateTime.add(DateTime.utc_now(), -retention_ms, :millisecond)
+
+    {count, _} =
+      Repo.delete_all(
+        from e in Event,
+          join: r in Run,
+          on: r.id == e.run_id,
+          where: e.type == "message.delta" and r.finished_at < ^cutoff
+      )
+
+    count
+  end
+
+  # The run's `Meridian.Runs.Worker` job, if it will still run it (or is, and started recently).
+  defp live_job(cutoff) do
+    worker = inspect(Meridian.Runs.Worker)
+
+    from j in Oban.Job,
+      where:
+        j.worker == ^worker and
+          fragment("?->>'run_id' = ?::text", j.args, parent_as(:run).id) and
+          (j.state in ["available", "scheduled", "retryable"] or
+             (j.state == "executing" and j.attempted_at >= ^cutoff))
   end
 
   defp insert_event(run, seq, type, payload) do
