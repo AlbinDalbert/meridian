@@ -54,6 +54,9 @@ RUN mix deps.compile
 
 COPY priv priv
 
+# The docs pages are rendered from these at compile time (see MeridianWeb.Docs).
+COPY docs/guide docs/guide
+
 COPY lib lib
 
 # Compile the release

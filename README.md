@@ -11,7 +11,8 @@ whatever your extensions add.
 - **`/api`** keeps threads on the server. A reply keeps generating if the client disconnects,
   and the client can resume the event stream where it left off.
 - **Extensions** are sandboxed Lua scripts, edited in the browser. They hook into every run
-  and can add tools.
+  and can add tools. [The guide](docs/guide/01-extensions/01-introduction.md) explains how to write them; a running
+  Meridian serves it at `/docs`.
 - **Skills** are instructions the model loads when a task calls for them.
 
 Status: early development. [`docs/design.md`](docs/design.md) explains how it works and why.

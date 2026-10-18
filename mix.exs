@@ -55,6 +55,8 @@ defmodule Meridian.MixProject do
       {:mint, "~> 1.0"},
       {:tz, "~> 0.28.4"},
       {:lua, "~> 1.0"},
+      # Renders the docs pages (docs/guide) at compile time; see MeridianWeb.Docs.
+      {:mdex, "~> 0.14.2", runtime: false},
       {:phoenix_html, "~> 4.3"},
       {:phoenix_live_view, "~> 1.2"},
       {:lazy_html, "~> 0.1.13", only: :test},
@@ -67,8 +69,8 @@ defmodule Meridian.MixProject do
   defp dialyzer do
     [
       plt_core_path: "_build/#{Mix.env()}",
-      # test/support uses ExUnit.
-      plt_add_apps: [:ex_unit]
+      # test/support uses ExUnit; MDEx is compile-time only (`runtime: false`).
+      plt_add_apps: [:ex_unit, :mdex]
     ]
   end
 

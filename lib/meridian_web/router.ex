@@ -55,6 +55,20 @@ defmodule MeridianWeb.Router do
     plug :put_secure_browser_headers, @browser_headers
   end
 
+  # The docs: public, no session.
+  pipeline :docs do
+    plug :accepts, ["html"]
+    plug :put_root_layout, html: {MeridianWeb.Layouts, :docs_root}
+    plug :put_secure_browser_headers, @browser_headers
+  end
+
+  scope "/docs", MeridianWeb do
+    pipe_through :docs
+
+    get "/", DocsController, :index
+    get "/:section/:page", DocsController, :show
+  end
+
   scope "/v1", MeridianWeb.V1 do
     pipe_through :openai
 

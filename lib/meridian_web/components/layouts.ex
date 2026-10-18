@@ -1,7 +1,8 @@
 defmodule MeridianWeb.Layouts do
   @moduledoc """
   Layouts for the admin console (`root/1`, `app/1`), the user area under `/me` (`me_root/1`,
-  `me/1`), and the front-door pages: the request page and the admin login (`public_root/1`).
+  `me/1`), the front-door pages: the request page and the admin login (`public_root/1`), and
+  the docs (`docs_root/1`, `docs/1`).
   """
   use MeridianWeb, :html
 
@@ -65,6 +66,32 @@ defmodule MeridianWeb.Layouts do
     """
   end
 
+  @doc """
+  The HTML document shell for the docs: public, no LiveView, in the admin console's colors. Its
+  only script highlights the code blocks.
+  """
+  def docs_root(assigns) do
+    ~H"""
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <.live_title suffix=" · Meridian docs">{assigns[:page_title] || "Docs"}</.live_title>
+        <link rel="icon" type="image/svg+xml" href={~p"/assets/favicon-admin.svg"} />
+        <link rel="stylesheet" href={~p"/assets/admin.css"} />
+        <script defer src={~p"/assets/lua.js"}>
+        </script>
+        <script defer src={~p"/assets/docs.js"}>
+        </script>
+      </head>
+      <body>
+        {@inner_content}
+      </body>
+    </html>
+    """
+  end
+
   # Each area connects to its own LiveView socket (see priv/static/assets/live.js). The root
   # layout's assigns are a plain map, not change-tracked, hence `Map.merge/2` above.
   defp document(assigns) do
@@ -83,6 +110,8 @@ defmodule MeridianWeb.Layouts do
         <script defer src={~p"/assets/vendor/phoenix.min.js"}>
         </script>
         <script defer src={~p"/assets/vendor/phoenix_live_view.min.js"}>
+        </script>
+        <script defer src={~p"/assets/lua.js"}>
         </script>
         <script defer src={~p"/assets/live.js"}>
         </script>
@@ -109,6 +138,7 @@ defmodule MeridianWeb.Layouts do
         current_path={@current_path}
       >
         <:footer>
+          <a href={~p"/docs"}>Docs</a>
           <.form for={%{}} action={~p"/admin/logout"} method="post">
             <button type="submit" class="link">Log out</button>
           </.form>
@@ -137,6 +167,7 @@ defmodule MeridianWeb.Layouts do
         current_path={@current_path}
       >
         <:footer :if={@current_user}>
+          <a href={~p"/docs"}>Docs</a>
           <span class="muted sidebar-user">{@current_user.email}</span>
           <.form for={%{}} action={~p"/me/logout"} method="post">
             <button type="submit" class="link">Log out</button>
@@ -149,6 +180,32 @@ defmodule MeridianWeb.Layouts do
       </main>
     </div>
     """
+  end
+
+  @doc "The docs page frame: a sidebar with every page, by section."
+  attr :current_path, :string, required: true
+  slot :inner_block, required: true
+
+  def docs(assigns) do
+    ~H"""
+    <div class="shell">
+      <.sidebar home={~p"/docs"} area="docs" sections={docs_sections()} current_path={@current_path} />
+      <main class="docs-main">
+        {render_slot(@inner_block)}
+      </main>
+    </div>
+    """
+  end
+
+  defp docs_sections do
+    for {section, label} <- MeridianWeb.Docs.sections() do
+      {label,
+       for(
+         page <- MeridianWeb.Docs.pages(),
+         page.section == section,
+         do: %{label: page.title, to: page.path}
+       )}
+    end
   end
 
   # The sidebar's groups. The admin console has its own (operating the instance) above the one

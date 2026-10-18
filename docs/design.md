@@ -123,7 +123,8 @@ call with no saved result is sent upstream as interrupted, so history is always 
 An extension is a Lua script stored in the database, edited in the browser, and enabled per
 agent. The script returns a table with hooks, `jobs`, `tools`, `settings`, and `validate`. See
 `Meridian.Extensions.Script` for the shape and `Meridian.Extensions.Capabilities` for the
-`meridian` table.
+`meridian` table; the guide for script authors is `docs/guide/01-extensions/`, served at
+`/docs`.
 
 - **Ownership.** Global (made in `/admin`) or a user's own (made in `/me`). Admins can read and
   edit all; users can read global ones.
@@ -204,7 +205,7 @@ never relinked.
 
 ## Web areas
 
-All LiveView, hand-written CSS, no asset build.
+All LiveView (except `/docs`), hand-written CSS, no asset build.
 
 - **`/admin`**: the operator console (green). **Operate**: users, access requests, runs (live
   event types and timings, never payloads). **Configure**: everyone's agents, skills,
@@ -215,6 +216,10 @@ All LiveView, hand-written CSS, no asset build.
   doesn't reveal who has access), there's one request per email (asking again bumps it), and
   open requests are capped at 200. The operator accepts (creates the user with a default
   agent), snoozes, or rejects (kept, so the email can't ask again).
+- **`/docs`**: public docs (green, like the console), no session. Each folder of `docs/guide/`
+  is a section and each markdown file a page (number prefixes set the order), rendered at
+  compile time, so adding a page is adding a file. Links between the files work on GitHub and in the app; tests check
+  that they resolve and that the example scripts load.
 
 ## Data model
 
@@ -297,6 +302,7 @@ Current decisions only. Superseded ones are removed; git history has them.
 | Skills are core data, delivered by progressive disclosure | A skills extension; full prompts every request | A skill is content, not code; descriptions keep requests small. |
 | Everything says "agent" (was "persona") | Two words | Breaking renames are fine; clients are ours. Data was migrated. |
 | No asset build | Tailwind/esbuild | No Node toolchain; strict CSP. |
+| Docs are the repo's markdown, served publicly at `/docs` | Docs only on GitHub; behind `/me` sign-in; hand-written pages | One source, readable in both places. Public, so operators and users share one link; it reveals nothing about the instance. Rendered at compile time with MDEx, so the release doesn't carry it. |
 | Kustomize bases | Helm | Plain YAML; deployment values stay out of this repo. |
 
 ## Open questions

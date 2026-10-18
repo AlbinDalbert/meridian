@@ -144,6 +144,8 @@ code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size:
   .nav-section { flex-direction: row; flex-wrap: wrap; align-items: center; }
   .nav-label { display: none; }
   .sidebar-footer { margin-top: 0; flex-direction: row; align-items: center; gap: 1rem; }
+  /* Auto margins would stop it stretching to the screen's width. */
+  main { width: 100%; padding: 1.25rem; }
 }
 
 .brand-word {
@@ -391,3 +393,87 @@ details.reference { margin-top: 2rem; }
 details.reference summary { font-weight: 500; }
 details.reference h3 { font-size: 1rem; margin: 1.5rem 0 0.5rem; }
 details.reference dl.details { gap: 0.5rem 1.5rem; }
+
+/* Docs (/docs): a page of rendered markdown, with its table of contents on wide screens. */
+main.docs-main { max-width: 1180px; padding: 2.5rem 2rem 4rem; }
+.docs-page { display: flex; gap: 3rem; align-items: flex-start; }
+article.docs { flex: 1; min-width: 0; max-width: 46rem; line-height: 1.65; }
+
+.docs h1 { font-size: 2rem; font-weight: 650; margin: 0 0 1.25rem; line-height: 1.2; }
+.docs h2 {
+  font-size: 1.35rem;
+  margin: 2.75rem 0 0.9rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+.docs h3 { font-size: 1.05rem; margin: 2rem 0 0.6rem; }
+.docs h1, .docs h2, .docs h3 { scroll-margin-top: 1rem; }
+.docs p, .docs ul, .docs ol { margin: 0 0 1rem; }
+.docs li { margin: 0.25rem 0; }
+.docs li > p { margin: 0; }
+.docs strong { color: var(--accent-strong); font-weight: 600; }
+
+/* The link MDEx puts in each heading: a "#" that shows on hover. */
+.docs a.anchor { margin-left: 0.4em; text-decoration: none; opacity: 0; }
+.docs a.anchor::before { content: "#"; color: var(--muted); }
+.docs :is(h1, h2, h3):hover a.anchor, .docs a.anchor:focus { opacity: 1; }
+
+.docs :not(pre) > code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 0.85em;
+}
+.docs :is(h1, h2, h3) code { padding: 0; border: none; background: none; font-size: 0.9em; }
+.docs pre {
+  margin: 0 0 1.25rem;
+  padding: 0.9rem 1.1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  line-height: 1.5;
+  tab-size: 2;
+}
+.docs pre code { font-size: 0.85em; }
+
+/* Tables scroll sideways instead of widening the page. */
+.docs table { display: block; overflow-x: auto; margin: 0 0 1.25rem; font-size: 0.93em; }
+.docs th { text-transform: none; font-size: 0.85em; }
+.docs td, .docs th { vertical-align: top; }
+
+.docs-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 3.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+.docs-pager a {
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-decoration: none;
+}
+.docs-pager a:hover { border-color: var(--accent); }
+.docs-pager .muted { font-size: 0.8rem; }
+.docs-next { margin-left: auto; text-align: right; }
+
+.docs-toc {
+  position: sticky;
+  top: 2.5rem;
+  flex: none;
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+}
+.docs-toc .nav-label { padding: 0; }
+.docs-toc a { color: var(--muted); text-decoration: none; }
+.docs-toc a:hover { color: var(--accent); }
+@media (max-width: 1100px) { .docs-toc { display: none; } }

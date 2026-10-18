@@ -1,8 +1,9 @@
 This is Meridian, a Phoenix application whose client-facing surfaces (`/v1`, `/api`) are JSON
 APIs. The only HTML is the operator console under `/admin`, the user area under `/me`, where
-users manage their own agents, and the public access request page `/me/request` (LiveView, no
+users manage their own agents, the public access request page `/me/request` (LiveView, no
 asset build: plain CSS and JS in `priv/static/assets/`, Phoenix/LiveView JS served from the
-deps).
+deps), and the public docs under `/docs`, rendered from the markdown in `docs/guide/` at
+compile time.
 Read `docs/design.md` before making architectural changes.
 
 ## Project guidelines
@@ -12,6 +13,7 @@ Read `docs/design.md` before making architectural changes.
 - Never hardcode deployment-specific values (hosts, URLs, credentials); everything environment-specific comes from env vars in `config/runtime.exs`
 - Keep the domain/web boundary: `lib/meridian/` is the domain (data, business logic, runs, extensions) and must never depend on `lib/meridian_web/` (HTTP, LiveView, plugs). The web layer calls into the domain, never the other way around
 - When a design decision is made or reversed, record it in the decision log in `docs/design.md` (replace superseded entries rather than striking them through)
+- When extensions' hooks, tools, limits or `meridian` table change, update the guide (`docs/guide/01-extensions/`) and the in-editor reference (`MeridianWeb.ExtensionComponents.reference/1`)
 - `BACKLOG.md` (gitignored, local only) is the backlog. Read it when picking up work; add tickets for problems you find but aren't fixing
 
 <!-- usage-rules-start -->

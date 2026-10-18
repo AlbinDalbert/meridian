@@ -96,6 +96,10 @@ defmodule MeridianWeb.ExtensionComponents do
     <details id="extension-reference" class="reference">
       <summary>Reference</summary>
       <p>
+        New to extensions? <a href="/docs/extensions/introduction">The guide</a> explains
+        everything below in detail, with examples.
+      </p>
+      <p>
         A script is Lua 5.3, sandboxed: no files, no OS, no <code>require</code>. It returns a
         table, and that table is the extension:
       </p>
@@ -204,6 +208,15 @@ defmodule MeridianWeb.ExtensionComponents do
           A chat completion (<code>messages</code>; <code>model</code> defaults to the agent's).
           Returns the reply's text and the whole response. In a hook, the run waits for it
           (e.g. a guardrail that checks a reply); in a job, it doesn't.
+        </dd>
+        <dt><code>meridian.http.request(request)</code></dt>
+        <dd>
+          An HTTP request (<code>url</code>; <code>method</code>, default <code>"GET"</code>;
+          <code>headers</code>; <code>body</code> text) to a public address. Returns
+          <code>status</code>, <code>headers</code> (lowercase names) and <code>body</code>,
+          also for error statuses; <code>nil</code> and a message when there's no response.
+          Follows redirects; 15 seconds; bodies over 2 MB are cut and get
+          <code>truncated = true</code>.
         </dd>
         <dt><code>meridian.jobs.enqueue(name, args, opts)</code></dt>
         <dd>
