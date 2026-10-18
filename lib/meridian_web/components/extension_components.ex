@@ -113,7 +113,8 @@ defmodule MeridianWeb.ExtensionComponents do
         <dt><code>jobs</code></dt>
         <dd>
           Functions <code>(args, ctx)</code> run in the background, queued with
-          <code>meridian.jobs.enqueue</code>.
+          <code>meridian.jobs.enqueue</code>. The run doesn't wait for them: queue one from a
+          hook for slow work that doesn't have to finish first. A job can take up to a minute.
         </dd>
         <dt><code>tools</code></dt>
         <dd>
@@ -133,7 +134,9 @@ defmodule MeridianWeb.ExtensionComponents do
         <code>ctx</code>: <code>run_id</code>, <code>thread_id</code>, <code>user_id</code>,
         <code>settings</code>, and <code>agent</code> (<code>id</code>, <code>slug</code>,
         <code>name</code>, <code>model</code>). Hooks that change a value return it; returning
-        nothing leaves it as it was. A hook that fails, or takes over 5 seconds, is skipped.
+        nothing leaves it as it was. The run waits for every hook, so keep them quick, and queue
+        a job for anything that doesn't have to finish first. A hook that fails, or takes over
+        30 seconds, is skipped.
       </p>
       <dl class="details">
         <dt><code>run_start(ctx)</code></dt>
@@ -199,7 +202,8 @@ defmodule MeridianWeb.ExtensionComponents do
         <dt><code>meridian.model.complete(request)</code></dt>
         <dd>
           A chat completion (<code>messages</code>; <code>model</code> defaults to the agent's).
-          Returns the reply's text and the whole response.
+          Returns the reply's text and the whole response. In a hook, the run waits for it
+          (e.g. a guardrail that checks a reply); in a job, it doesn't.
         </dd>
         <dt><code>meridian.jobs.enqueue(name, args, opts)</code></dt>
         <dd>

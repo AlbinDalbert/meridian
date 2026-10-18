@@ -15,7 +15,8 @@ defmodule Meridian.Extensions.Capabilities do
       `{only_if_untitled = true}` a title that's already set is left alone. Returns true
     * `meridian.model.complete(request)` - a non-streaming chat completions request
       (`messages` required; `model` defaults to the agent's). Returns the reply's text and
-      the whole response
+      the whole response. From a hook, the run waits for the answer; queue a job instead if
+      it doesn't have to
     * `meridian.jobs.enqueue(name, args, opts)` - runs `M.jobs[name](args, ctx)` in the
       background, with this call's context. `opts.unique`: a key; while a job with the same
       name and key is pending, another isn't queued. `opts.delay`: seconds to wait first

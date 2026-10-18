@@ -7,9 +7,10 @@ defmodule Meridian.Runs.RunServer do
   agent snapshot, streams the completion from the upstream, and either saves the reply (the
   run is done) or, if the model asked for tools, saves its message, runs the tools, saves their
   results, and starts the next step. The request runs in a separate process
-  (`Meridian.Upstream.Stream`) that forwards the response here, and each tool call runs in its
-  own task that sends its result here, so cancel requests, timers, response chunks, and tool
-  results are all just messages, and this process never blocks waiting for them.
+  (`Meridian.Upstream.Stream`) that forwards the response here, each tool call runs in its
+  own task that sends its result here, and so do extension hooks (see below). Cancel requests,
+  timers, response chunks, tool results, and hook results are all just messages, and this
+  process never blocks waiting for them.
 
   A reply is only saved as completed if the upstream said the model finished (a
   `finish_reason`). A stream that ends without one, or that contains an event that isn't
@@ -22,6 +23,11 @@ defmodule Meridian.Runs.RunServer do
   and `before_model_request` while building the request, `message_end` before a reply is saved,
   `tool_call` and `tool_result` around each tool call, and `step_end`. `run_end` fires from
   `Meridian.Runs.finish_run/3`.
+
+  Hooks run in a task (`await_hooks/3`), one stage at a time, while this process waits for the
+  task's result in `hooks` (`{stage, task}`): a slow handler makes the run slower, but cancels
+  and heartbeats still get through. A tool call's `tool_call` and `tool_result` handlers run in
+  that call's own task.
 
   Text and reasoning deltas are buffered and emitted as one `message.delta` event per
   `:delta_flush_interval` (milliseconds; `0` emits one event per upstream chunk), so the event
@@ -99,6 +105,8 @@ defmodule Meridian.Runs.RunServer do
       usage: nil,
       # Tool calls running: task ref => {call, task}.
       running_tools: %{},
+      # Hooks running, and what to do with their result: {stage, task}, or nil.
+      hooks: nil,
       flush_timer: nil,
       idle_timer: nil
     }
@@ -124,15 +132,7 @@ defmodule Meridian.Runs.RunServer do
             extensions: Extensions.enabled(ctx.agent)
         }
 
-        Extensions.notify(state.extensions, :run_start, [], ctx)
-
-        case configure(state) do
-          {:ok, state} ->
-            start_step(state)
-
-          {:halt, reason} ->
-            fail(state, %{"code" => "rejected", "message" => reason})
-        end
+        configure(state)
 
       {:error, :not_queued} ->
         # Cancelled before it started, or already handled.
@@ -154,19 +154,86 @@ defmodule Meridian.Runs.RunServer do
       tools: Enum.map(tool_set, & &1.definition)
     }
 
-    with {:cont, config} <- Extensions.run(extensions, :before_run, config, ctx) do
-      by_name = Map.new(tool_set, &{&1.name, &1})
-
-      tools =
-        Map.new(config.tools, fn definition ->
-          {definition["name"], %{by_name[definition["name"]] | definition: definition}}
-        end)
-
-      {:ok, %{state | config: config, tools: tools}}
-    end
+    await_hooks(state, {:configure, tool_set}, fn ->
+      Extensions.notify(extensions, :run_start, [], ctx)
+      Extensions.run(extensions, :before_run, config, ctx)
+    end)
   end
 
-  defp start_step(state) do
+  # Runs hooks in a task, and continues with `hooks_done/3` once it sends the result.
+  defp await_hooks(state, stage, fun) do
+    task = Task.Supervisor.async_nolink(Meridian.Extensions.TaskSupervisor, fun)
+    {:noreply, %{state | hooks: {stage, task}}}
+  end
+
+  defp hooks_done({:configure, tool_set}, {:cont, config}, state) do
+    by_name = Map.new(tool_set, &{&1.name, &1})
+
+    tools =
+      Map.new(config.tools, fn definition ->
+        {definition["name"], %{by_name[definition["name"]] | definition: definition}}
+      end)
+
+    start_step(%{state | config: config, tools: tools})
+  end
+
+  defp hooks_done({:configure, _tool_set}, {:halt, reason}, state) do
+    fail(state, %{"code" => "rejected", "message" => reason})
+  end
+
+  defp hooks_done(:request, body, state) do
+    {:ok, stream} = Upstream.Stream.start_link(body)
+    {:noreply, reset_idle_timer(%{state | stream: stream})}
+  end
+
+  defp hooks_done({:tool_calls, calls}, {:cont, content}, state) do
+    seq = state.seq + 1
+
+    {:ok, {_message, _event}} =
+      Runs.add_message(
+        state.run,
+        seq,
+        %{
+          role: "assistant",
+          content: content,
+          tool_calls: calls,
+          metadata: %{"finish_reason" => state.finish_reason},
+          usage: state.usage
+        },
+        "message.completed"
+      )
+
+    state = %{
+      state
+      | seq: seq,
+        run_usage: add_usage(state.run_usage, state.usage),
+        usage: nil
+    }
+
+    calls
+    |> Enum.reduce(state, &start_tool_call/2)
+    |> maybe_end_step()
+  end
+
+  defp hooks_done({:finish, status}, content, state) do
+    message =
+      if content do
+        finish_reason = if status == :cancelled, do: "cancelled", else: state.finish_reason
+        %{content: content, metadata: %{"finish_reason" => finish_reason}, usage: state.usage}
+      end
+
+    end_run(state, status, message: message, usage: add_usage(state.run_usage, state.usage))
+  end
+
+  defp stop_hooks(%{hooks: {_stage, task}} = state) do
+    Task.shutdown(task, :brutal_kill)
+    %{state | hooks: nil}
+  end
+
+  defp stop_hooks(state), do: state
+
+  # `ended_step` is the previous step's `step_end` payload, for every step after the first.
+  defp start_step(state, ended_step \\ nil) do
     state = %{
       state
       | step: state.step + 1,
@@ -178,13 +245,17 @@ defmodule Meridian.Runs.RunServer do
         usage: nil
     }
 
-    {:ok, stream} = Upstream.Stream.start_link(request_body(state))
-    {:noreply, reset_idle_timer(%{state | stream: stream})}
+    %{run: run, ctx: ctx, extensions: extensions, config: config} = state
+
+    await_hooks(state, :request, fn ->
+      if ended_step, do: Extensions.notify(extensions, :step_end, [ended_step], ctx)
+      request_body(run, ctx, extensions, config)
+    end)
   end
 
   # Every step's request is built the same way: `context` gets the conversation so far
   # (including earlier steps' tool calls and results), `before_model_request` the final body.
-  defp request_body(%{run: run, ctx: ctx, extensions: extensions, config: config}) do
+  defp request_body(run, ctx, extensions, config) do
     history = run |> Threads.list_run_history() |> Message.to_upstream_history()
     {:cont, messages} = Extensions.run(extensions, :context, history, ctx)
 
@@ -210,8 +281,12 @@ defmodule Meridian.Runs.RunServer do
     do: Map.put(body, "tools", Enum.map(definitions, &%{"type" => "function", "function" => &1}))
 
   @impl true
+  # Already finishing: let it.
+  def handle_info({:cancel_run, run_id}, %{run_id: run_id, hooks: {{:finish, _}, _}} = state),
+    do: {:noreply, state}
+
   def handle_info({:cancel_run, run_id}, %{run_id: run_id} = state) do
-    finish(state, :cancelled)
+    finish(stop_hooks(state), :cancelled)
   end
 
   def handle_info(:flush, state), do: {:noreply, flush(%{state | flush_timer: nil})}
@@ -250,28 +325,36 @@ defmodule Meridian.Runs.RunServer do
     })
   end
 
+  def handle_info({ref, result}, %{hooks: {stage, %Task{ref: ref}}} = state) do
+    Process.demonitor(ref, [:flush])
+    hooks_done(stage, result, %{state | hooks: nil})
+  end
+
+  def handle_info(
+        {:DOWN, ref, :process, _pid, reason},
+        %{hooks: {_stage, %Task{ref: ref}}} = state
+      ) do
+    Logger.error("Extension hooks crashed: #{inspect(reason)}")
+    fail(%{state | hooks: nil}, %{"code" => "internal_error", "message" => "The run crashed."})
+  end
+
   def handle_info({ref, result}, state) when is_map_key(state.running_tools, ref) do
     Process.demonitor(ref, [:flush])
-    {{call, _task}, running} = Map.pop(state.running_tools, ref)
-
-    result =
-      case result do
-        {:ok, text} -> {"ok", text}
-        {:error, message} -> {"error", "Error: " <> message}
-      end
+    {_call, running} = Map.pop(state.running_tools, ref)
 
     %{state | running_tools: running}
-    |> tool_done(call, result)
+    |> save_tool_result(result)
     |> maybe_end_step()
   end
 
+  # The task crashed before `tool_result` could run, so the error is saved as it is.
   def handle_info({:DOWN, ref, :process, _pid, reason}, state)
       when is_map_key(state.running_tools, ref) do
     Logger.error("Tool call crashed: #{inspect(reason)}")
     {{call, _task}, running} = Map.pop(state.running_tools, ref)
 
     %{state | running_tools: running}
-    |> tool_done(call, {"error", "Error: the tool crashed."})
+    |> save_tool_result(tool_result(call, {"error", "Error: the tool crashed."}))
     |> maybe_end_step()
   end
 
@@ -492,38 +575,16 @@ defmodule Meridian.Runs.RunServer do
           }
         end)
 
-      {:cont, content} =
-        Extensions.run(state.extensions, :message_end, reply_content(state, false), state.ctx)
+      %{extensions: extensions, ctx: ctx} = state
+      content = reply_content(state, false)
 
-      seq = state.seq + 1
-
-      {:ok, {_message, _event}} =
-        Runs.add_message(
-          state.run,
-          seq,
-          %{
-            role: "assistant",
-            content: content,
-            tool_calls: calls,
-            metadata: %{"finish_reason" => state.finish_reason},
-            usage: state.usage
-          },
-          "message.completed"
-        )
-
-      state = %{
-        state
-        | seq: seq,
-          run_usage: add_usage(state.run_usage, state.usage),
-          usage: nil
-      }
-
-      calls
-      |> Enum.reduce(state, &start_tool_call/2)
-      |> maybe_end_step()
+      await_hooks(state, {:tool_calls, calls}, fn ->
+        Extensions.run(extensions, :message_end, content, ctx)
+      end)
     end
   end
 
+  # Every call runs in its own task, hooks included: `tool_call`, the tool, then `tool_result`.
   defp start_tool_call(%{"id" => id, "function" => function}, state) do
     %{"name" => name, "arguments" => arguments} = function
 
@@ -532,21 +593,43 @@ defmodule Meridian.Runs.RunServer do
 
     call = %{"id" => id, "name" => name}
 
-    with {:ok, tool} <- fetch_tool(state, name),
-         {:ok, arguments} <- decode_arguments(arguments),
-         call = Map.put(call, "arguments", arguments),
-         {:ok, call} <- check_tool_call(state, call) do
-      ctx = state.ctx
+    prepared =
+      with {:ok, tool} <- fetch_tool(state, name),
+           {:ok, arguments} <- decode_arguments(arguments),
+           do: {:ok, tool, Map.put(call, "arguments", arguments)}
 
-      task =
-        Task.Supervisor.async_nolink(Meridian.Extensions.TaskSupervisor, fn ->
-          execute_tool(tool, call["arguments"], ctx)
-        end)
+    %{extensions: extensions, ctx: ctx} = state
 
-      %{state | running_tools: Map.put(state.running_tools, task.ref, {call, task})}
-    else
-      {:error, message} -> tool_done(state, call, {"error", "Error: " <> message})
-    end
+    task =
+      Task.Supervisor.async_nolink(Meridian.Extensions.TaskSupervisor, fn ->
+        run_tool_call(prepared, call, extensions, ctx)
+      end)
+
+    %{state | running_tools: Map.put(state.running_tools, task.ref, {call, task})}
+  end
+
+  # Runs in the call's task. Calls that can't run (unknown tool, bad arguments, blocked) get
+  # their error as the result.
+  defp run_tool_call(prepared, call, extensions, ctx) do
+    {call, outcome} =
+      with {:ok, tool, call} <- prepared,
+           {:ok, call} <- check_tool_call(extensions, call, ctx) do
+        {call, execute_tool(tool, call["arguments"], ctx)}
+      else
+        {:error, message} -> {call, {:error, message}}
+        {:blocked, call, reason} -> {call, {:error, "the call was blocked: #{reason}"}}
+      end
+
+    status_text =
+      case outcome do
+        {:ok, text} -> {"ok", text}
+        {:error, message} -> {"error", "Error: " <> message}
+      end
+
+    {:cont, result} =
+      Extensions.run(extensions, :tool_result, tool_result(call, status_text), ctx)
+
+    result
   end
 
   # `load_skill` is the core's own tool; every other tool is an extension's.
@@ -571,15 +654,15 @@ defmodule Meridian.Runs.RunServer do
     end
   end
 
-  defp check_tool_call(state, call) do
-    case Extensions.tool_call(state.extensions, call, state.ctx) do
+  defp check_tool_call(extensions, call, ctx) do
+    case Extensions.tool_call(extensions, call, ctx) do
       {:ok, call} -> {:ok, call}
-      {:blocked, reason} -> {:error, "the call was blocked: #{reason}"}
+      {:blocked, reason} -> {:blocked, call, reason}
     end
   end
 
-  # A call has its result (`{status, text}`): pass it through `tool_result` and save it.
-  defp tool_done(state, call, {status, text}) do
+  # A call's result (`{status, text}`), as `tool_result` gets it.
+  defp tool_result(call, {status, text}) do
     max = config(:max_tool_result_chars, 20_000)
 
     text =
@@ -587,15 +670,17 @@ defmodule Meridian.Runs.RunServer do
         do: String.slice(text, 0, max) <> "\n[Truncated: the result was over #{max} characters.]",
         else: text
 
-    result = %{
+    %{
       "id" => call["id"],
       "name" => call["name"],
       "arguments" => Map.get(call, "arguments", %{}),
       "content" => text,
       "status" => status
     }
+  end
 
-    {:cont, result} = Extensions.run(state.extensions, :tool_result, result, state.ctx)
+  defp save_tool_result(state, result) do
+    %{"id" => id, "name" => name, "status" => status} = result
     seq = state.seq + 1
 
     {:ok, _} =
@@ -604,12 +689,12 @@ defmodule Meridian.Runs.RunServer do
         seq,
         %{
           role: "tool",
-          tool_call_id: call["id"],
+          tool_call_id: id,
           content: [%{"type" => "text", "text" => result["content"]}],
           metadata: %{"status" => status}
         },
         "tool_call.completed",
-        %{"id" => call["id"], "name" => call["name"], "status" => status}
+        %{"id" => id, "name" => name, "status" => status}
       )
 
     %{state | seq: seq}
@@ -619,19 +704,8 @@ defmodule Meridian.Runs.RunServer do
   defp maybe_end_step(%{running_tools: running} = state) when map_size(running) > 0,
     do: {:noreply, state}
 
-  defp maybe_end_step(state) do
-    end_step(state, "tool_calls")
-    start_step(state)
-  end
-
-  defp end_step(state, finish_reason) do
-    Extensions.notify(
-      state.extensions,
-      :step_end,
-      [%{"index" => state.step, "finish_reason" => finish_reason}],
-      state.ctx
-    )
-  end
+  defp maybe_end_step(state),
+    do: start_step(state, %{"index" => state.step, "finish_reason" => "tool_calls"})
 
   defp stop_tools(state) do
     Enum.each(state.running_tools, fn {_ref, {_call, task}} ->
@@ -651,21 +725,32 @@ defmodule Meridian.Runs.RunServer do
     end)
   end
 
+  # A reply (complete, or partial when cancelled) goes through `message_end`, and a completed
+  # run's last step through `step_end`, before the run ends.
+  # The stream is closed first: what it still sends would otherwise finish the run again while
+  # the hooks run.
   defp finish(state, status) do
-    state = state |> stop_tools() |> flush()
+    state = state |> stop_tools() |> flush() |> stop_idle_timer()
+    message? = status == :completed or state.text != [] or state.reasoning != []
 
-    message =
-      if status == :completed or state.text != [] or state.reasoning != [] do
-        {:cont, content} =
-          Extensions.run(state.extensions, :message_end, reply_content(state, true), state.ctx)
+    if message? or status == :completed do
+      %{extensions: extensions, ctx: ctx} = state
+      content = if message?, do: reply_content(state, true)
+      ended_step = %{"index" => state.step, "finish_reason" => state.finish_reason}
 
-        finish_reason = if status == :cancelled, do: "cancelled", else: state.finish_reason
+      await_hooks(state, {:finish, status}, fn ->
+        content =
+          if content do
+            {:cont, content} = Extensions.run(extensions, :message_end, content, ctx)
+            content
+          end
 
-        %{content: content, metadata: %{"finish_reason" => finish_reason}, usage: state.usage}
-      end
-
-    if status == :completed, do: end_step(state, state.finish_reason)
-    end_run(state, status, message: message, usage: add_usage(state.run_usage, state.usage))
+        if status == :completed, do: Extensions.notify(extensions, :step_end, [ended_step], ctx)
+        content
+      end)
+    else
+      hooks_done({:finish, status}, nil, state)
+    end
   end
 
   # The step's reply as content parts. A final reply always has a text part, even if empty.
@@ -679,7 +764,7 @@ defmodule Meridian.Runs.RunServer do
   end
 
   defp fail(state, error) do
-    state = stop_tools(state)
+    state = state |> stop_tools() |> stop_hooks()
     end_run(flush(state), :failed, error: error, usage: add_usage(state.run_usage, state.usage))
   end
 
@@ -697,14 +782,19 @@ defmodule Meridian.Runs.RunServer do
     # Crashed or shut down mid-run: don't leave the run (and its thread) hanging.
     cancel_stream(state)
     stop_tools(state)
+    stop_hooks(state)
     error = %{"code" => "interrupted", "message" => "The run was interrupted."}
     Runs.finish_run(run, :failed, error: error)
   rescue
     e -> Logger.error("Could not fail interrupted run: #{Exception.message(e)}")
   end
 
-  # However the run ended, close the upstream connection if it is still open.
-  def terminate(_reason, state), do: cancel_stream(state)
+  # However the run ended, close the upstream connection and stop anything still running.
+  def terminate(_reason, state) do
+    cancel_stream(state)
+    stop_tools(state)
+    stop_hooks(state)
+  end
 
   defp cancel_stream(%{stream: stream}) when is_pid(stream), do: Upstream.Stream.cancel(stream)
   defp cancel_stream(_state), do: :ok

@@ -12,11 +12,13 @@ defmodule Meridian.Extensions do
   settings, which are merged over the script's defaults. Entries for extensions that are gone,
   or that the agent's user can't use, are kept but ignored.
 
-  Hook handlers run sandboxed with a timeout (`:hook_timeout`, milliseconds). A handler that
-  fails, or returns something that isn't a valid value for its hook, is skipped, and the error
-  is kept as the extension's latest error (`last_error/1`).
+  Hook handlers run sandboxed with a timeout (`:hook_timeout`, milliseconds; 30 s, so a
+  handler can call the model). The run waits for them; work that doesn't have to finish first
+  belongs in a job the handler queues. A handler that fails, or returns something that isn't a
+  valid value for its hook, is skipped, and the error is kept as the extension's latest error
+  (`last_error/1`).
 
-  Scripts can also have tools (see `tool_set/1` and `run_tool/3`), which run with a longer
+  Scripts can also have tools (see `tool_set/1` and `run_tool/3`), which run with their own
   timeout (`:tool_timeout`).
 
   Every handler call emits a `[:meridian, :extensions, :hook]` telemetry event, with the
@@ -658,7 +660,7 @@ defmodule Meridian.Extensions do
     end
   end
 
-  defp timeout, do: config(:hook_timeout, :timer.seconds(5))
+  defp timeout, do: config(:hook_timeout, :timer.seconds(30))
 
   @doc false
   def config(key, default) do

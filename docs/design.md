@@ -129,6 +129,9 @@ agent. The script returns a table with hooks, `jobs`, `tools`, `settings`, and `
 - **Failure.** A crashing or hanging handler is logged, shown on the extension's page, and
   skipped (fail-open), except `tool_call`, which blocks the call (fail-closed). A script never
   takes down a run.
+- **Sync and async.** A hook is a point in the lifecycle; a script subscribes a handler to it.
+  The run waits for handlers (30 s each, enough for a model call); background work is a job
+  the handler queues with `meridian.jobs.enqueue` (1 min).
 
 ### Hooks
 
@@ -262,7 +265,7 @@ Current decisions only. Superseded ones are removed; git history has them.
 | Sign-ins link by verified email; no signup | Auto-creating users | Users stay operator-created. Never relinking prevents takeover. |
 | Public access requests reveal nothing and are capped | Signup; telling people they have access | Friends can ask without exposing who uses it. |
 | Deltas coalesced before broadcast | Live tokens, coalesced persistence | One event sequence: live and replay identical, trivial dedupe. |
-| `RunServer` never blocks on upstream | Calling Req inline | A blocked server can't cancel or heartbeat, and the janitor would kill a live run. |
+| `RunServer` never blocks, on upstream or on hooks | Calling Req or scripts inline | A blocked server can't cancel or heartbeat, and the janitor would kill a live run. Each hook runs in one task; the server waits for its message. |
 | Strict completion (needs `finish_reason`) | Treating end of body as success | A dropped connection must not be saved as a full answer. |
 | No retry/resume; fail fast (3 layers) | Oban retries + checkpointed steps | Frees the thread instead of leaving it stuck. Resume needs `run_steps`. |
 | Partial replies kept on cancel | Discarding | The user saw that text. |
@@ -270,6 +273,8 @@ Current decisions only. Superseded ones are removed; git history has them.
 | Script calls start from loaded state; cached by source hash | Live Lua state per extension | No leakage between users or runs, no cache invalidation. |
 | Timeout + heap cap + instruction budget per call | Timeout only | Deterministic failure for runaway loops; scripts can't grow the node. |
 | Every lifecycle hook exists, used or not | Hooks on demand | Extensions shouldn't need a core change first. |
+| Hooks are always awaited; jobs are the async path | A per-extension sync/async switch | Hooks see the run in order and may change it. Background work is a hook that enqueues a job: one way to do it. |
+| Hooks may call the model, with a 30 s limit like tools | Forbidding model calls in hooks; jobs only | Guardrails (e.g. a small model checking a tool call) must finish before the run goes on. The latency is the extension's choice. |
 | Extensions enabled per agent by id, off by default | Global enablement; by name | Per-user control; user and global extensions may share names. |
 | Tools are part of extensions; all-or-nothing enablement | Separate tool rows; per-tool switches | One feature = one script sharing code and settings. Optional parts are settings. |
 | Tool failures are results for the model | Failing the run | Models recover well from `Error: ...`. |

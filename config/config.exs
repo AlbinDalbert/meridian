@@ -13,8 +13,9 @@ config :meridian,
 
 # Extensions are Lua scripts kept in the database (see Meridian.Extensions). Hook handlers that
 # take longer than `hook_timeout` (milliseconds) are skipped; background jobs get `job_timeout`.
+# Hooks get as long as tools, so they can call the model (e.g. a guardrail checking a reply).
 config :meridian, Meridian.Extensions,
-  hook_timeout: :timer.seconds(5),
+  hook_timeout: :timer.seconds(30),
   job_timeout: :timer.minutes(1)
 
 config :elixir, :time_zone_database, Tz.TimeZoneDatabase

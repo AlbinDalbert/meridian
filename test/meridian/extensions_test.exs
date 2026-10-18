@@ -401,6 +401,48 @@ defmodule Meridian.ExtensionsTest do
       refute_received {:upstream_request, _body}
     end
 
+    test "a slow handler doesn't block the run: it can still be cancelled", %{
+      user: user,
+      agent: agent
+    } do
+      # A handler waiting on a model call that never answers.
+      extension =
+        extension_fixture(nil, """
+        return { context = function()
+          meridian.model.complete({ messages = { { role = "user", content = "Hi" } } })
+        end }
+        """)
+
+      enable(agent, %{extension.id => %{}})
+      test_pid = self()
+
+      Req.Test.stub(Meridian.Upstream, fn _conn ->
+        send(test_pid, {:handler_waiting, self()})
+
+        receive do
+          :never -> :ok
+        end
+      end)
+
+      thread = thread_fixture(user)
+      {_message, run} = message_fixture(thread)
+      task = Task.async(fn -> perform_job(Worker, %{"run_id" => run.id}) end)
+      assert_receive {:handler_waiting, handler_pid}, 2000
+      handler_ref = Process.monitor(handler_pid)
+
+      # The RunServer answers while the handler runs (it used to wait up to `:hook_timeout`).
+      server = Meridian.Runs.RunServer.whereis(run.id)
+      assert %{hooks: {:request, _task}} = :sys.get_state(server, 100)
+
+      assert {:ok, _run} = Runs.cancel_run(Runs.get_run!(run.id))
+      assert :ok = Task.await(task)
+      assert Runs.get_run!(run.id).status == :cancelled
+
+      # The handler was stopped because the run ended, not because it timed out.
+      assert_receive {:DOWN, ^handler_ref, :process, ^handler_pid, :caller_down}
+      refute_received {:upstream_request, _body}
+    end
+
     test "other hooks can't halt", %{user: user, agent: agent} do
       extension =
         extension_fixture(nil, """
@@ -497,6 +539,60 @@ defmodule Meridian.ExtensionsTest do
       assert_received {:completion_request, %{"model" => "qwen", "messages" => [_, user_message]}}
       assert user_message["content"] == "Hi"
       assert Threads.get_thread!(thread.id).title == "Greetings"
+    end
+
+    test "a hook can call the model, and the run waits for the answer", %{
+      user: user,
+      agent: agent
+    } do
+      extension =
+        extension_fixture(nil, """
+        return { context = function(messages)
+          local verdict = assert(meridian.model.complete({
+            messages = { { role = "user", content = "Is this fine? " .. messages[1].content } },
+          }))
+          table.insert(messages, 1, { role = "system", content = "Checked: " .. verdict })
+          return messages
+        end }
+        """)
+
+      enable(agent, %{extension.id => %{}})
+      test_pid = self()
+      stream = completion_events(["Hello"])
+
+      # The hook's request is a plain completion; the run's own request streams.
+      Req.Test.stub(Meridian.Upstream, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        body = Jason.decode!(body)
+        send(test_pid, {:upstream_request, body})
+
+        if body["stream"] do
+          conn = conn |> Plug.Conn.put_resp_content_type("text/event-stream")
+          conn = Plug.Conn.send_chunked(conn, 200)
+
+          Enum.reduce(stream, conn, fn event, conn ->
+            {:ok, conn} = Plug.Conn.chunk(conn, event)
+            conn
+          end)
+        else
+          Req.Test.json(conn, %{
+            "choices" => [%{"message" => %{"role" => "assistant", "content" => "yes"}}]
+          })
+        end
+      end)
+
+      thread = thread_fixture(user)
+      {_message, run} = message_fixture(thread, "Hi")
+      :ok = perform_job(Worker, %{"run_id" => run.id})
+      assert Runs.get_run!(run.id).status == :completed
+
+      assert_received {:upstream_request, %{"messages" => [check]} = hook_request}
+      refute hook_request["stream"]
+      assert check["content"] == "Is this fine? Hi"
+
+      assert_received {:upstream_request, %{"stream" => true, "messages" => [system | _]}}
+      assert system["content"] == "Be brief.\n\nChecked: yes"
+      assert Extensions.last_error(extension) == nil
     end
 
     test "unique jobs aren't queued twice", %{user: user, agent: agent} do
