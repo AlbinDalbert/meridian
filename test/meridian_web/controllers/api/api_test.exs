@@ -192,6 +192,168 @@ defmodule MeridianWeb.ApiTest do
     end
   end
 
+  describe "reshaping threads" do
+    # A thread with two finished turns: Q1/A1, Q2/A2.
+    setup %{conn: conn} do
+      thread = create_thread(conn, %{"title" => "Original"})
+      stub_upstream_streams([completion_events(["A1"]), completion_events(["A2"])])
+
+      for q <- ["Q1", "Q2"] do
+        %{"run" => %{"id" => run_id}} = send_message(conn, thread["id"], q)
+        :ok = execute(run_id)
+      end
+
+      %{thread: thread}
+    end
+
+    defp messages(conn, thread_id) do
+      conn
+      |> get(~p"/api/threads/#{thread_id}/messages")
+      |> json_response(200)
+      |> Map.fetch!("data")
+    end
+
+    defp texts(messages), do: Enum.map(messages, &(&1["content"] |> hd() |> Map.get("text")))
+
+    # The user and assistant texts a run sent upstream.
+    defp upstream_texts do
+      assert_receive {:upstream_request, %{"messages" => messages}}
+
+      for %{"role" => role, "content" => text} <- messages,
+          role in ["user", "assistant"],
+          do: text
+    end
+
+    test "truncate and reply reroll the last reply", %{conn: conn, thread: thread} do
+      [_q1, _a1, q2, a2] = messages(conn, thread["id"])
+      flush_upstream_requests()
+
+      assert conn
+             |> post(~p"/api/threads/#{thread["id"]}/truncate", %{"after" => q2["id"]})
+             |> response(204)
+
+      assert texts(messages(conn, thread["id"])) == ["Q1", "A1", "Q2"]
+
+      stub_upstream_stream(completion_events(["A2 again"]))
+
+      assert %{"data" => %{"id" => run_id, "status" => "queued", "user_message_id" => q2_id}} =
+               conn |> post(~p"/api/threads/#{thread["id"]}/reply") |> json_response(202)
+
+      assert q2_id == q2["id"]
+      :ok = execute(run_id)
+
+      assert upstream_texts() == ["Q1", "A1", "Q2"]
+      assert texts(messages(conn, thread["id"])) == ["Q1", "A1", "Q2", "A2 again"]
+
+      # The replaced reply's run is kept.
+      assert %{"data" => %{"status" => "completed"}} =
+               conn |> get(~p"/api/runs/#{a2["run_id"]}") |> json_response(200)
+    end
+
+    test "reply needs a user message waiting for one", %{conn: conn, thread: thread} do
+      assert %{"error" => %{"code" => "nothing_to_reply"}} =
+               conn |> post(~p"/api/threads/#{thread["id"]}/reply") |> json_response(409)
+
+      empty = create_thread(conn)
+
+      assert %{"error" => %{"code" => "nothing_to_reply"}} =
+               conn |> post(~p"/api/threads/#{empty["id"]}/reply") |> json_response(409)
+    end
+
+    test "truncating deletes the runs of deleted user messages", %{conn: conn, thread: thread} do
+      [_q1, a1, _q2, a2] = messages(conn, thread["id"])
+
+      assert conn
+             |> post(~p"/api/threads/#{thread["id"]}/truncate", %{"after" => a1["id"]})
+             |> response(204)
+
+      assert texts(messages(conn, thread["id"])) == ["Q1", "A1"]
+      assert conn |> get(~p"/api/runs/#{a2["run_id"]}") |> json_response(404)
+    end
+
+    test "truncate needs one of the thread's messages and no active run", %{
+      conn: conn,
+      thread: thread
+    } do
+      [q1 | _] = messages(conn, thread["id"])
+      other = create_thread(conn)
+      path = ~p"/api/threads/#{other["id"]}/truncate"
+
+      for after_id <- [q1["id"], "nope", nil] do
+        assert conn |> post(path, %{"after" => after_id}) |> json_response(404)
+      end
+
+      %{"message" => q} = send_message(conn, other["id"], "Hi")
+
+      assert %{"error" => %{"code" => "run_active"}} =
+               conn |> post(path, %{"after" => q["id"]}) |> json_response(409)
+    end
+
+    test "fork copies the history through a message", %{conn: conn, thread: thread} do
+      [q1, a1, q2, _a2] = original = messages(conn, thread["id"])
+      flush_upstream_requests()
+
+      assert %{"data" => fork} =
+               conn
+               |> post(~p"/api/threads/#{thread["id"]}/fork", %{"through" => q2["id"]})
+               |> json_response(201)
+
+      assert fork["id"] != thread["id"]
+      assert fork["title"] == "Original"
+      assert fork["agent"] == thread["agent"]
+
+      copies = messages(conn, fork["id"])
+      assert texts(copies) == ["Q1", "A1", "Q2"]
+      assert Enum.all?(copies, &(&1["thread_id"] == fork["id"] and &1["run_id"] == nil))
+      assert Enum.map(copies, & &1["inserted_at"]) == Enum.map([q1, a1, q2], & &1["inserted_at"])
+      assert messages(conn, thread["id"]) == original
+
+      # The fork ends on a user message, so it can be answered.
+      stub_upstream_stream(completion_events(["A2 elsewhere"]))
+
+      assert %{"data" => %{"id" => run_id}} =
+               conn |> post(~p"/api/threads/#{fork["id"]}/reply") |> json_response(202)
+
+      :ok = execute(run_id)
+      assert upstream_texts() == ["Q1", "A1", "Q2"]
+      assert texts(messages(conn, fork["id"])) == ["Q1", "A1", "Q2", "A2 elsewhere"]
+    end
+
+    test "fork without through copies everything", %{conn: conn, thread: thread} do
+      assert %{"data" => fork} =
+               conn |> post(~p"/api/threads/#{thread["id"]}/fork") |> json_response(201)
+
+      assert texts(messages(conn, fork["id"])) == ["Q1", "A1", "Q2", "A2"]
+    end
+
+    test "fork needs one of the thread's messages", %{conn: conn, thread: thread} do
+      other = create_thread(conn)
+      %{"message" => q} = send_message(conn, other["id"], "Hi")
+
+      for through <- [q["id"], "nope"] do
+        assert conn
+               |> post(~p"/api/threads/#{thread["id"]}/fork", %{"through" => through})
+               |> json_response(404)
+      end
+    end
+
+    test "other users' threads can't be reshaped", %{thread: thread} do
+      stranger = authed(build_conn(), api_key_fixture(user_fixture()))
+
+      for action <- ["fork", "truncate", "reply"] do
+        assert stranger |> post("/api/threads/#{thread["id"]}/#{action}") |> json_response(404)
+      end
+    end
+  end
+
+  defp flush_upstream_requests do
+    receive do
+      {:upstream_request, _} -> flush_upstream_requests()
+    after
+      0 -> :ok
+    end
+  end
+
   describe "run events (SSE)" do
     setup %{conn: conn} do
       thread = create_thread(conn)

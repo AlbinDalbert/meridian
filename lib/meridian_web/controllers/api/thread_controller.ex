@@ -1,8 +1,12 @@
 defmodule MeridianWeb.Api.ThreadController do
-  @moduledoc "`/api/threads`: the current user's threads."
+  @moduledoc """
+  `/api/threads`: the current user's threads, and what reshapes them: forking a copy,
+  truncating the history, and replying again to the last user message.
+  """
   use MeridianWeb, :controller
 
   alias Meridian.{Runs, Threads}
+  alias MeridianWeb.Api.RunJSON
 
   action_fallback MeridianWeb.Api.FallbackController
 
@@ -40,6 +44,37 @@ defmodule MeridianWeb.Api.ThreadController do
     with %{} = thread <- Threads.get_user_thread(conn.assigns.current_user, id),
          {:ok, _thread} <- Threads.delete_thread(thread) do
       send_resp(conn, :no_content, "")
+    end
+  end
+
+  @doc "Copies the thread, with its messages through `through` (all of them if not given)."
+  def fork(conn, %{"id" => id} = params) do
+    with %{} = thread <- Threads.get_user_thread(conn.assigns.current_user, id),
+         {:ok, fork} <- Threads.fork_thread(thread, params["through"]) do
+      conn
+      |> put_status(:created)
+      |> render(:show, thread: fork)
+    end
+  end
+
+  @doc "Deletes the messages after the one with id `after`."
+  def truncate(conn, %{"id" => id} = params) do
+    with %{} = thread <- Threads.get_user_thread(conn.assigns.current_user, id),
+         {:ok, _count} <- Threads.truncate_thread(thread, params["after"]) do
+      send_resp(conn, :no_content, "")
+    end
+  end
+
+  @doc "Starts a run replying to the thread's last message, which must be a user message."
+  def reply(conn, %{"id" => id}) do
+    %{current_user: user, current_policy: policy} = conn.assigns
+
+    with %{} = thread <- Threads.get_user_thread(user, id),
+         {:ok, run} <- Threads.reply(thread, policy) do
+      conn
+      |> put_status(:accepted)
+      |> put_view(RunJSON)
+      |> render(:show, run: run)
     end
   end
 end

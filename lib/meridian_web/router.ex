@@ -76,6 +76,9 @@ defmodule MeridianWeb.Router do
 
     get "/agents", AgentController, :index
     resources "/threads", ThreadController, except: [:new, :edit]
+    post "/threads/:id/fork", ThreadController, :fork
+    post "/threads/:id/truncate", ThreadController, :truncate
+    post "/threads/:id/reply", ThreadController, :reply
     get "/threads/:thread_id/messages", MessageController, :index
     post "/threads/:thread_id/messages", MessageController, :create
     get "/runs/:id", RunController, :show

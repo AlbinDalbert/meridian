@@ -66,12 +66,17 @@ persistence.
 | `GET /api/agents` | The user's agents |
 | `/api/threads` (CRUD) | Threads |
 | `GET/POST /api/threads/:id/messages` | History / send a message → `{message, run}` immediately |
+| `POST /api/threads/:id/fork` | Copy the thread with its messages `through` one (all if omitted) → the new thread |
+| `POST /api/threads/:id/truncate` | Delete the messages `after` one (and the runs of deleted user messages) |
+| `POST /api/threads/:id/reply` | Reply again to the last message, if it's a user message → `run` |
 | `GET /api/runs/:id`, `POST /api/runs/:id/cancel` | Run status / cancel |
 | `GET /api/runs/:id/events` | SSE, resumable via `Last-Event-ID` or `?after=` |
 | `/api/auth/*` | Sign-in for browser apps (see Identity) |
 
 - One active run per thread (partial unique index). Sending while busy is a `409`; so is
-  deleting a thread with an active run.
+  deleting or truncating a thread with an active run.
+- Rerolling is `truncate` after the user message, then `reply`. Editing a message is `truncate`
+  before it, then sending. Branching at a message is `fork` (then `reply` if it ends on one).
 - Errors use the OpenAI shape: `{"error": {"message", "type", "code"}}`.
 - Browser apps are first-class: CORS from `CORS_ALLOWED_ORIGINS` (never with credentials).
   `EventSource` can't send headers, so runs carry an `events_token` (signed, one run, one hour)
@@ -272,6 +277,7 @@ Current decisions only. Superseded ones are removed; git history has them.
 | Strict completion (needs `finish_reason`) | Treating end of body as success | A dropped connection must not be saved as a full answer. |
 | No retry/resume; fail fast (3 layers) | Oban retries + checkpointed steps | Frees the thread instead of leaving it stuck. Resume needs `run_steps`. |
 | Partial replies kept on cancel | Discarding | The user saw that text. |
+| Fork, truncate, and reply as primitives; forks copy messages | Reroll/edit endpoints; reply variants in place; threads pointing at a parent | Three plain operations compose into reroll, edit, and branching. Copies keep history queries flat and branches independent of their origin. |
 | Extensions are sandboxed Lua in the DB | Elixir modules, Deno, QuickJS, WASM | Edit-and-save without a deploy, safe for users to write, pure Elixir. Cost: no deps, slow interpreter. |
 | Script calls start from loaded state; cached by source hash | Live Lua state per extension | No leakage between users or runs, no cache invalidation. |
 | Timeout + heap cap + instruction budget per call | Timeout only | Deterministic failure for runaway loops; scripts can't grow the node. |

@@ -158,6 +158,87 @@ defmodule Meridian.Threads do
     end
   end
 
+  @doc """
+  Copies a thread for its user, with the same title and agent and copies of its messages up to
+  and including `through_id` (all of them if nil). The copies keep their content and times but
+  belong to no run. Returns `{:error, :not_found}` if `through_id` isn't one of the thread's
+  messages.
+  """
+  def fork_thread(%Thread{} = thread, through_id) do
+    with {:ok, messages} <- messages_through(thread, through_id),
+         {:ok, fork} <- insert_fork(thread, messages) do
+      %{agent: agent} = fork = Repo.preload(fork, :agent)
+      notify_extensions(:thread_created, fork, agent)
+      {:ok, fork}
+    end
+  end
+
+  defp messages_through(thread, nil), do: {:ok, list_all_messages(thread)}
+
+  defp messages_through(thread, through_id) do
+    with %Message{id: through_id} <- get_thread_message(thread, through_id) do
+      {:ok, Enum.filter(list_all_messages(thread), &(&1.id <= through_id))}
+    end
+  end
+
+  # Ids are generated in insertion order, so the copies keep the originals' order.
+  defp insert_fork(thread, messages) do
+    Repo.transact(fn ->
+      fork =
+        Repo.insert!(%Thread{
+          user_id: thread.user_id,
+          agent_id: thread.agent_id,
+          title: thread.title
+        })
+
+      for m <- messages do
+        Repo.insert!(%Message{
+          thread_id: fork.id,
+          role: m.role,
+          content: m.content,
+          metadata: m.metadata,
+          usage: m.usage,
+          tool_calls: m.tool_calls,
+          tool_call_id: m.tool_call_id,
+          inserted_at: m.inserted_at
+        })
+      end
+
+      {:ok, fork}
+    end)
+  end
+
+  @doc """
+  Deletes a thread's messages after the one with id `after_id`, and the runs that answered the
+  deleted user messages. Fails while the thread has an active run, and with
+  `{:error, :not_found}` if `after_id` isn't one of the thread's messages.
+  """
+  def truncate_thread(%Thread{} = thread, after_id) do
+    with %Message{id: after_id} <- get_thread_message(thread, after_id) do
+      if Repo.exists?(
+           from r in Run, where: r.thread_id == ^thread.id and r.status in ^Run.active_statuses()
+         ) do
+        {:error, :run_active}
+      else
+        {count, _} =
+          Repo.delete_all(
+            from m in Message, where: m.thread_id == ^thread.id and m.id > ^after_id
+          )
+
+        {:ok, count}
+      end
+    end
+  end
+
+  defp get_thread_message(%Thread{id: thread_id}, id) do
+    with {:ok, id} <- Ecto.UUID.cast(id),
+         %Message{} = message <- Repo.get_by(Message, id: id, thread_id: thread_id) do
+      message
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
   # Thread hooks use the agent's current settings (there is no run to freeze them in).
   defp notify_extensions(_hook, _thread, nil), do: :ok
 
@@ -222,28 +303,63 @@ defmodule Meridian.Threads do
   an active run, and `{:error, :agent_not_found}` if the key may not use the agent.
   """
   def send_message(%Thread{} = thread, %Policy{} = policy, attrs) do
-    slug = if thread.agent, do: thread.agent.slug
-
-    with {:ok, agent} <- Agents.resolve_agent(%User{id: thread.user_id}, policy, slug),
+    with {:ok, agent} <- run_agent(thread, policy),
          {:ok, {message, run}} <- insert_message_and_run(thread, agent, attrs) do
       Meridian.Runs.broadcast_run(run)
       {:ok, message, run}
     end
   end
 
+  @doc """
+  Starts a run to reply to the thread's last message, which must be a user message without a
+  reply (e.g. after `truncate_thread/2` or `fork_thread/2`). Fails with
+  `{:error, :nothing_to_reply}` otherwise, and like `send_message/3` on an active run or an
+  agent the key may not use.
+  """
+  def reply(%Thread{} = thread, %Policy{} = policy) do
+    with {:ok, agent} <- run_agent(thread, policy),
+         {:ok, message} <- awaiting_reply(thread),
+         {:ok, run} <- Repo.transact(fn -> start_run(thread, agent, message) end) do
+      Meridian.Runs.broadcast_run(run)
+      {:ok, run}
+    end
+  end
+
+  defp awaiting_reply(%Thread{id: thread_id}) do
+    case Repo.one(
+           from m in Message, where: m.thread_id == ^thread_id, order_by: [desc: m.id], limit: 1
+         ) do
+      %Message{role: "user"} = message -> {:ok, message}
+      _ -> {:error, :nothing_to_reply}
+    end
+  end
+
+  defp run_agent(thread, policy) do
+    slug = if thread.agent, do: thread.agent.slug
+    Agents.resolve_agent(%User{id: thread.user_id}, policy, slug)
+  end
+
   defp insert_message_and_run(thread, agent, attrs) do
     Repo.transact(fn ->
       with {:ok, message} <-
              Repo.insert(Message.user_changeset(%Message{thread_id: thread.id}, attrs)),
-           {:ok, run} <- insert_run(thread, agent, message),
-           {:ok, _job} <- Oban.insert(Worker.new(%{run_id: run.id})) do
-        Repo.update_all(from(t in Thread, where: t.id == ^thread.id),
-          set: [updated_at: DateTime.utc_now()]
-        )
-
+           {:ok, run} <- start_run(thread, agent, message) do
         {:ok, {message, run}}
       end
     end)
+  end
+
+  # Inserts a run replying to `message` and its job, and moves the thread up the list. Call in
+  # a transaction.
+  defp start_run(thread, agent, message) do
+    with {:ok, run} <- insert_run(thread, agent, message),
+         {:ok, _job} <- Oban.insert(Worker.new(%{run_id: run.id})) do
+      Repo.update_all(from(t in Thread, where: t.id == ^thread.id),
+        set: [updated_at: DateTime.utc_now()]
+      )
+
+      {:ok, run}
+    end
   end
 
   # The only way inserting a valid run fails is the one-active-run-per-thread index.

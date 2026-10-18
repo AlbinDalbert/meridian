@@ -30,6 +30,15 @@ defmodule MeridianWeb.Api.FallbackController do
     )
   end
 
+  def call(conn, {:error, :nothing_to_reply}) do
+    OpenAIError.send_error(
+      conn,
+      409,
+      "nothing_to_reply",
+      "The thread's last message isn't a user message waiting for a reply."
+    )
+  end
+
   def call(conn, {:error, :invalid_cursor}) do
     OpenAIError.send_error(conn, 400, "invalid_cursor", "`after` must be a non-negative integer.")
   end
