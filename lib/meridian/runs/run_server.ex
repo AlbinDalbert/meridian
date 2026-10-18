@@ -39,9 +39,8 @@ defmodule Meridian.Runs.RunServer do
 
   alias Meridian.{Extensions, Agents, Runs, Skills, Threads, Upstream}
   alias Meridian.Extensions.Context
-  alias Meridian.Runs.Run
+  alias Meridian.Runs.{Run, Step}
   alias Meridian.Threads.Message
-  alias Meridian.Upstream.SSE
 
   @registry Meridian.Runs.Registry
   @supervisor Meridian.Runs.Supervisor
@@ -89,20 +88,11 @@ defmodule Meridian.Runs.RunServer do
       # tools by name.
       config: nil,
       tools: %{},
-      step: 0,
+      # The current step's reply so far (index 0: no step yet).
+      step: Step.new(0),
       # Usage of the steps before this one.
       run_usage: nil,
       stream: nil,
-      sse: SSE.new(),
-      # This step's reply so far, and what hasn't been emitted as a delta yet (iodata).
-      text: [],
-      reasoning: [],
-      pending_text: [],
-      pending_reasoning: [],
-      # Tool calls being streamed, by index: %{id, name, arguments (iodata)}.
-      tool_calls: %{},
-      finish_reason: nil,
-      usage: nil,
       # Tool calls running: task ref => {call, task}.
       running_tools: %{},
       # Hooks running, and what to do with their result: {stage, task}, or nil.
@@ -197,17 +187,18 @@ defmodule Meridian.Runs.RunServer do
           role: "assistant",
           content: content,
           tool_calls: calls,
-          metadata: %{"finish_reason" => state.finish_reason},
-          usage: state.usage
+          metadata: %{"finish_reason" => state.step.finish_reason},
+          usage: state.step.usage
         },
         "message.completed"
       )
 
+    # The step's usage now counts towards the run's, so it isn't added again when finishing.
     state = %{
       state
       | seq: seq,
-        run_usage: add_usage(state.run_usage, state.usage),
-        usage: nil
+        run_usage: Step.add_usage(state.run_usage, state.step.usage),
+        step: %{state.step | usage: nil}
     }
 
     calls
@@ -215,14 +206,14 @@ defmodule Meridian.Runs.RunServer do
     |> maybe_end_step()
   end
 
-  defp hooks_done({:finish, status}, content, state) do
+  defp hooks_done({:finish, status}, content, %{step: step} = state) do
     message =
       if content do
-        finish_reason = if status == :cancelled, do: "cancelled", else: state.finish_reason
-        %{content: content, metadata: %{"finish_reason" => finish_reason}, usage: state.usage}
+        finish_reason = if status == :cancelled, do: "cancelled", else: step.finish_reason
+        %{content: content, metadata: %{"finish_reason" => finish_reason}, usage: step.usage}
       end
 
-    end_run(state, status, message: message, usage: add_usage(state.run_usage, state.usage))
+    end_run(state, status, message: message, usage: Step.add_usage(state.run_usage, step.usage))
   end
 
   defp stop_hooks(%{hooks: {_stage, task}} = state) do
@@ -234,17 +225,7 @@ defmodule Meridian.Runs.RunServer do
 
   # `ended_step` is the previous step's `step_end` payload, for every step after the first.
   defp start_step(state, ended_step \\ nil) do
-    state = %{
-      state
-      | step: state.step + 1,
-        sse: SSE.new(),
-        text: [],
-        reasoning: [],
-        tool_calls: %{},
-        finish_reason: nil,
-        usage: nil
-    }
-
+    state = %{state | step: Step.new(state.step.index + 1)}
     %{run: run, ctx: ctx, extensions: extensions, config: config} = state
 
     await_hooks(state, :request, fn ->
@@ -393,105 +374,30 @@ defmodule Meridian.Runs.RunServer do
   defp handle_items([:done | _rest], state), do: complete(state)
 
   defp handle_items([{:data, chunk} | rest], state) do
-    {events, sse} = SSE.parse(state.sse, chunk)
+    case Step.feed(state.step, chunk) do
+      {:cont, step} ->
+        handle_items(rest, maybe_flush(%{state | step: step}))
 
-    case handle_events(events, %{state | sse: sse}) do
-      {:cont, state} -> handle_items(rest, state)
-      {:done, state} -> complete(state)
-      {:error, error, state} -> fail(state, error)
+      {:done, step} ->
+        complete(%{state | step: step})
+
+      {:upstream_error, error, step} ->
+        fail(%{state | step: step}, %{
+          "code" => "upstream_error",
+          "message" => upstream_error_message(error, nil)
+        })
+
+      {:invalid_event, data, step} ->
+        Logger.warning("Unparseable upstream event: #{String.slice(data, 0, 200)}")
+
+        fail(%{state | step: step}, %{
+          "code" => "upstream_error",
+          "message" => "The upstream sent an invalid event."
+        })
     end
   end
 
   defp handle_items([_other | rest], state), do: handle_items(rest, state)
-
-  defp handle_events([], state), do: {:cont, maybe_flush(state)}
-  defp handle_events(["[DONE]" | _rest], state), do: {:done, state}
-
-  defp handle_events([data | rest], state) do
-    case Jason.decode(data) do
-      {:ok, %{"error" => error}} ->
-        {:error, %{"code" => "upstream_error", "message" => upstream_error_message(error, nil)},
-         state}
-
-      {:ok, %{} = chunk} ->
-        handle_events(rest, handle_chunk(chunk, state))
-
-      _ ->
-        Logger.warning("Unparseable upstream event: #{String.slice(data, 0, 200)}")
-
-        {:error,
-         %{"code" => "upstream_error", "message" => "The upstream sent an invalid event."}, state}
-    end
-  end
-
-  defp handle_chunk(chunk, state) do
-    state =
-      case chunk do
-        %{"usage" => %{} = usage} -> %{state | usage: usage}
-        _ -> state
-      end
-
-    case chunk do
-      %{"choices" => [%{} = choice | _]} ->
-        delta = Map.get(choice, "delta") || %{}
-
-        state
-        |> add_delta(:text, :pending_text, delta["content"])
-        |> add_delta(
-          :reasoning,
-          :pending_reasoning,
-          delta["reasoning_content"] || delta["reasoning"]
-        )
-        |> add_tool_call_deltas(delta["tool_calls"])
-        |> Map.update!(:finish_reason, &(choice["finish_reason"] || &1))
-
-      _ ->
-        state
-    end
-  end
-
-  defp add_delta(state, total_key, pending_key, text) when is_binary(text) and text != "" do
-    state
-    |> Map.update!(total_key, &[&1, text])
-    |> Map.update!(pending_key, &[&1, text])
-  end
-
-  defp add_delta(state, _total_key, _pending_key, _text), do: state
-
-  # Tool calls stream in pieces: the id and name first, then the arguments (a JSON string) in
-  # fragments, each piece saying which call (`index`) it belongs to.
-  defp add_tool_call_deltas(state, [_ | _] = deltas) do
-    deltas
-    |> Enum.with_index()
-    |> Enum.reduce(state, fn
-      {%{} = delta, position}, state ->
-        index = delta["index"] || position
-        function = delta["function"] || %{}
-        call = Map.get(state.tool_calls, index, %{id: nil, name: nil, arguments: []})
-
-        call = %{
-          call
-          | id: call.id || non_empty(delta["id"]),
-            name: call.name || non_empty(function["name"]),
-            arguments: [call.arguments | arguments_fragment(function["arguments"])]
-        }
-
-        %{state | tool_calls: Map.put(state.tool_calls, index, call)}
-
-      _other, state ->
-        state
-    end)
-  end
-
-  defp add_tool_call_deltas(state, _deltas), do: state
-
-  defp non_empty(text) when is_binary(text) and text != "", do: text
-  defp non_empty(_text), do: nil
-
-  defp arguments_fragment(text) when is_binary(text), do: text
-  # Some upstreams send the arguments as an object rather than as JSON text.
-  defp arguments_fragment(%{} = arguments), do: Jason.encode!(arguments)
-  defp arguments_fragment(_arguments), do: []
 
   ## Deltas
 
@@ -500,31 +406,24 @@ defmodule Meridian.Runs.RunServer do
       0 ->
         flush(state)
 
-      interval
-      when is_nil(state.flush_timer) and
-             (state.pending_text != [] or state.pending_reasoning != []) ->
-        %{state | flush_timer: Process.send_after(self(), :flush, interval)}
+      interval when is_nil(state.flush_timer) ->
+        if Step.pending_delta?(state.step),
+          do: %{state | flush_timer: Process.send_after(self(), :flush, interval)},
+          else: state
 
       _ ->
         state
     end
   end
 
-  defp flush(%{pending_text: [], pending_reasoning: []} = state), do: state
-
   defp flush(state) do
     if state.flush_timer, do: Process.cancel_timer(state.flush_timer)
+    state = %{state | flush_timer: nil}
 
-    payload =
-      %{
-        "content" => IO.iodata_to_binary(state.pending_text),
-        "reasoning" => IO.iodata_to_binary(state.pending_reasoning)
-      }
-      |> Map.reject(fn {_key, text} -> text == "" end)
-
-    state
-    |> emit("message.delta", payload)
-    |> Map.merge(%{pending_text: [], pending_reasoning: [], flush_timer: nil})
+    case Step.take_delta(state.step) do
+      {nil, _step} -> state
+      {payload, step} -> emit(%{state | step: step}, "message.delta", payload)
+    end
   end
 
   defp emit(state, type, payload) do
@@ -537,14 +436,16 @@ defmodule Meridian.Runs.RunServer do
 
   # The upstream stream ended ([DONE] or end of body). Only a model that reported why it
   # stopped has finished its reply; anything else is a truncated stream.
-  defp complete(%{finish_reason: nil} = state) do
+  defp complete(%{step: %Step{finish_reason: nil}} = state) do
     fail(state, %{
       "code" => "upstream_incomplete",
       "message" => "The upstream ended the response before the model finished."
     })
   end
 
-  defp complete(%{tool_calls: calls} = state) when map_size(calls) > 0, do: run_tools(state)
+  defp complete(%{step: %Step{tool_calls: calls}} = state) when map_size(calls) > 0,
+    do: run_tools(state)
+
   defp complete(state), do: finish(state, :completed)
 
   ## Tools
@@ -554,29 +455,15 @@ defmodule Meridian.Runs.RunServer do
   defp run_tools(state) do
     state = state |> flush() |> stop_idle_timer()
 
-    if state.step >= config(:max_steps, 10) do
+    if state.step.index >= config(:max_steps, 10) do
       fail(state, %{
         "code" => "too_many_steps",
-        "message" => "The model kept calling tools for more than #{state.step} steps."
+        "message" => "The model kept calling tools for more than #{state.step.index} steps."
       })
     else
-      calls =
-        state.tool_calls
-        |> Enum.sort()
-        |> Enum.map(fn {_index, call} ->
-          %{
-            "id" =>
-              call.id || "call_" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower),
-            "type" => "function",
-            "function" => %{
-              "name" => call.name || "",
-              "arguments" => IO.iodata_to_binary(call.arguments)
-            }
-          }
-        end)
-
+      calls = Step.tool_calls(state.step)
       %{extensions: extensions, ctx: ctx} = state
-      content = reply_content(state, false)
+      content = Step.content(state.step, false)
 
       await_hooks(state, {:tool_calls, calls}, fn ->
         Extensions.run(extensions, :message_end, content, ctx)
@@ -705,7 +592,7 @@ defmodule Meridian.Runs.RunServer do
     do: {:noreply, state}
 
   defp maybe_end_step(state),
-    do: start_step(state, %{"index" => state.step, "finish_reason" => "tool_calls"})
+    do: start_step(state, %{"index" => state.step.index, "finish_reason" => "tool_calls"})
 
   defp stop_tools(state) do
     Enum.each(state.running_tools, fn {_ref, {_call, task}} ->
@@ -715,28 +602,18 @@ defmodule Meridian.Runs.RunServer do
     %{state | running_tools: %{}}
   end
 
-  defp add_usage(nil, usage), do: usage
-  defp add_usage(usage, nil), do: usage
-
-  defp add_usage(total, usage) do
-    Map.merge(total, usage, fn
-      _key, a, b when is_integer(a) and is_integer(b) -> a + b
-      _key, _a, b -> b
-    end)
-  end
-
   # A reply (complete, or partial when cancelled) goes through `message_end`, and a completed
   # run's last step through `step_end`, before the run ends.
   # The stream is closed first: what it still sends would otherwise finish the run again while
   # the hooks run.
   defp finish(state, status) do
     state = state |> stop_tools() |> flush() |> stop_idle_timer()
-    message? = status == :completed or state.text != [] or state.reasoning != []
+    message? = status == :completed or Step.reply?(state.step)
 
     if message? or status == :completed do
-      %{extensions: extensions, ctx: ctx} = state
-      content = if message?, do: reply_content(state, true)
-      ended_step = %{"index" => state.step, "finish_reason" => state.finish_reason}
+      %{extensions: extensions, ctx: ctx, step: step} = state
+      content = if message?, do: Step.content(step, true)
+      ended_step = %{"index" => step.index, "finish_reason" => step.finish_reason}
 
       await_hooks(state, {:finish, status}, fn ->
         content =
@@ -753,19 +630,10 @@ defmodule Meridian.Runs.RunServer do
     end
   end
 
-  # The step's reply as content parts. A final reply always has a text part, even if empty.
-  defp reply_content(state, final?) do
-    text = IO.iodata_to_binary(state.text)
-    reasoning = IO.iodata_to_binary(state.reasoning)
-
-    [{"reasoning", reasoning}, {"text", text}]
-    |> Enum.reject(fn {type, text} -> text == "" and (type == "reasoning" or not final?) end)
-    |> Enum.map(fn {type, text} -> %{"type" => type, "text" => text} end)
-  end
-
   defp fail(state, error) do
     state = state |> stop_tools() |> stop_hooks()
-    end_run(flush(state), :failed, error: error, usage: add_usage(state.run_usage, state.usage))
+    usage = Step.add_usage(state.run_usage, state.step.usage)
+    end_run(flush(state), :failed, error: error, usage: usage)
   end
 
   defp end_run(state, status, opts) do
