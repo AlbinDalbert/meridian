@@ -131,9 +131,12 @@ agent. The script returns a table with hooks, `jobs`, `tools`, `settings`, and `
   nothing is on by default. Settings are frozen in the run's agent snapshot. Scripts are not:
   a saved script is used from the next call. Missing ids are kept and ignored.
 - **Sandbox.** Scripts reach Meridian only through the `meridian` table, always scoped to the
-  user the call runs for. Every call runs in its own process, starting from the script's
-  loaded state (nothing carries over), with a timeout, a heap cap, and an instruction budget
-  (2M). Loaded scripts are cached per node by source hash.
+  user the call runs for. The only way out is `meridian.http.request`: public addresses only
+  (checked after resolving, every redirect too), 15 s, bodies cut at 2 MB. Every call runs in
+  its own process, starting from the script's loaded state (nothing carries over), with a
+  timeout, a heap cap, and an instruction budget (2M loop iterations and function calls; a
+  built-in like `string.gsub` counts as one, however much work it does). Loaded scripts are
+  cached per node by source hash.
 - **Failure.** A crashing or hanging handler is logged, shown on the extension's page, and
   skipped (fail-open), except `tool_call`, which blocks the call (fail-closed). A script never
   takes down a run.
@@ -281,6 +284,8 @@ Current decisions only. Superseded ones are removed; git history has them.
 | Extensions are sandboxed Lua in the DB | Elixir modules, Deno, QuickJS, WASM | Edit-and-save without a deploy, safe for users to write, pure Elixir. Cost: no deps, slow interpreter. |
 | Script calls start from loaded state; cached by source hash | Live Lua state per extension | No leakage between users or runs, no cache invalidation. |
 | Timeout + heap cap + instruction budget per call | Timeout only | Deterministic failure for runaway loops; scripts can't grow the node. |
+| Capabilities are primitives (e.g. raw HTTP); features built on them are extensions | Convenience capabilities (HTML-to-text, fetch-a-page) | One small surface to secure; the rest is editable without a deploy. A primitive is added only when a script can't do it itself. |
+| Script HTTP reaches public addresses only, connecting to the checked IP | Allowlists; checking the hostname | Any user can write a script; it mustn't reach the node's network or cloud metadata. Pinning the IP closes DNS rebinding. Uses Mint directly, since Req can't be pointed at an address without a pool per host. |
 | Every lifecycle hook exists, used or not | Hooks on demand | Extensions shouldn't need a core change first. |
 | Hooks are always awaited; jobs are the async path | A per-extension sync/async switch | Hooks see the run in order and may change it. Background work is a hook that enqueues a job: one way to do it. |
 | Deltas of finished runs are deleted after a day | Keeping every event | Deltas are most of `run_events` and repeat `message.completed`. Replaying a recent run stays exact. |

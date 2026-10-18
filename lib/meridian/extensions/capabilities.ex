@@ -17,6 +17,11 @@ defmodule Meridian.Extensions.Capabilities do
       (`messages` required; `model` defaults to the agent's). Returns the reply's text and
       the whole response. From a hook, the run waits for the answer; queue a job instead if
       it doesn't have to
+    * `meridian.http.request(request)` - an HTTP request (`url` required; `method` default
+      `"GET"`, `headers`, `body` text) to a public address. Returns `status`, `headers`
+      (lowercase names) and `body` text, also for error statuses; nil and a message when there
+      is no response (blocked address, timeout, ...). Redirects are followed. A body over 2 MB
+      is cut there and the response gets `truncated = true`. 15 s limit
     * `meridian.jobs.enqueue(name, args, opts)` - runs `M.jobs[name](args, ctx)` in the
       background, with this call's context. `opts.unique`: a key; while a job with the same
       name and key is pending, another isn't queued. `opts.delay`: seconds to wait first
@@ -29,7 +34,7 @@ defmodule Meridian.Extensions.Capabilities do
 
   require Logger
 
-  alias Meridian.Extensions.{Job, Script}
+  alias Meridian.Extensions.{HTTP, Job, Script}
   alias Meridian.Repo
   alias Meridian.Threads.{Message, Thread}
   alias Meridian.{Threads, Upstream}
@@ -43,6 +48,7 @@ defmodule Meridian.Extensions.Capabilities do
     |> function([:threads, :set_title], &set_title/2)
     |> function([:model, :complete], &complete/2)
     |> function([:jobs, :enqueue], &enqueue/2)
+    |> function([:http, :request], &http_request/2)
     |> function([:now], &now/2)
     |> function([:json, :encode], &json_encode/2)
     |> function([:json, :decode], &json_decode/2)
@@ -171,6 +177,17 @@ defmodule Meridian.Extensions.Capabilities do
   end
 
   defp enqueue(_args, call), do: argument_error!(call, "expected a job name")
+
+  ## HTTP
+
+  defp http_request([%{} = request | _], _call) do
+    case HTTP.request(request) do
+      {:ok, response} -> [response]
+      {:error, message} -> [nil, message]
+    end
+  end
+
+  defp http_request(_args, call), do: argument_error!(call, "expected a request table")
 
   ## Utilities
 

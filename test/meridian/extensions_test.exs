@@ -663,5 +663,26 @@ defmodule Meridian.ExtensionsTest do
       assert system_prompt_sent() ==
                ~s(Be brief.\n\n#{year} [1,2] unknown timezone "Mars/Olympus")
     end
+
+    test "HTTP doesn't reach private addresses", %{user: user, agent: agent} do
+      extension =
+        extension_fixture(nil, """
+        return {
+          before_run = function(config)
+            local res, err = meridian.http.request({ url = "http://169.254.169.254/latest" })
+            local ok = pcall(meridian.http.request, "http://example.com")
+            table.insert(config.system_prompt, table.concat({tostring(res), err,
+              tostring(ok)}, " "))
+            return config
+          end,
+        }
+        """)
+
+      enable(agent, %{extension.id => %{}})
+      run_message(user)
+
+      assert system_prompt_sent() ==
+               "Be brief.\n\nnil 169.254.169.254 is a private or reserved address false"
+    end
   end
 end

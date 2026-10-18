@@ -51,6 +51,8 @@ defmodule Meridian.MixProject do
       {:bandit, "~> 1.5"},
       {:oban, "~> 2.24"},
       {:req, "~> 0.7.5"},
+      # Req runs on Mint; scripts' HTTP uses it directly (see Meridian.Extensions.HTTP).
+      {:mint, "~> 1.0"},
       {:tz, "~> 0.28.4"},
       {:lua, "~> 1.0"},
       {:phoenix_html, "~> 4.3"},
