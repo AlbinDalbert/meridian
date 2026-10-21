@@ -62,6 +62,19 @@ defmodule MeridianWeb.Router do
     plug :put_secure_browser_headers, @browser_headers
   end
 
+  # The front page: public, no session.
+  pipeline :public do
+    plug :accepts, ["html"]
+    plug :put_root_layout, html: {MeridianWeb.Layouts, :public_root}
+    plug :put_secure_browser_headers, @browser_headers
+  end
+
+  scope "/", MeridianWeb do
+    pipe_through :public
+
+    get "/", PageController, :home
+  end
+
   scope "/docs", MeridianWeb do
     pipe_through :docs
 

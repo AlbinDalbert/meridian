@@ -1,5 +1,6 @@
-/* The front-door pages (the request page and the admin login), in the look of xebec's login:
-   its Ember palette and type by default, the admin console's green with body.theme-admin. */
+/* The front-door pages (the front page, the request page and the logins), in the look of xebec's login:
+   its Ember palette and type by default, the admin console's green under .theme-admin (the
+   admin login's body, or the admin card on the front page). */
 
 :root {
   --bg: #0c0b09;
@@ -19,8 +20,8 @@
   color-scheme: dark;
 }
 
-/* The admin login: the console's colors (see admin.css), following the system's light or dark. */
-body.theme-admin {
+/* The admin login and card: the console's colors (see admin.css), following the system's light or dark. */
+.theme-admin {
   --bg: #f7f7f5;
   --panel: #ffffff;
   --text: #1c1c1a;
@@ -31,11 +32,12 @@ body.theme-admin {
   --accent-strong: #5e9c87;
   --accent-soft: rgba(47, 93, 80, 0.14);
   --emphasis: var(--accent);
+  color: var(--text);
   color-scheme: light dark;
 }
 
 @media (prefers-color-scheme: dark) {
-  body.theme-admin {
+  .theme-admin {
     --bg: #161615;
     --panel: #1f1f1d;
     --text: #e8e8e3;
@@ -100,6 +102,17 @@ body {
   font-style: italic;
   font-size: 15px;
 }
+
+/* The front page's cards: admin on the left, user on the right. */
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: stretch;
+  gap: 24px;
+}
+.choices .dialog { width: min(320px, 92vw); }
+.scrim > .link { margin-left: 0; }
 
 .dialog {
   width: min(460px, 92vw);

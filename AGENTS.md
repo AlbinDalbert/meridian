@@ -1,5 +1,6 @@
 This is Meridian, a Phoenix application whose client-facing surfaces (`/v1`, `/api`) are JSON
-APIs. The only HTML is the operator console under `/admin`, the user area under `/me`, where
+APIs. The only HTML is the front page `/` (pick admin or user sign-in), the operator console
+under `/admin`, the user area under `/me`, where
 users manage their own agents, the public access request page `/me/request` (LiveView, no
 asset build: plain CSS and JS in `priv/static/assets/`, Phoenix/LiveView JS served from the
 deps), and the public docs under `/docs`, rendered from the markdown in `docs/guide/` at
